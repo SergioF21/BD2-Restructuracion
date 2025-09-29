@@ -26,11 +26,18 @@ class RTreeNode:
             maxy = max(child[3] for child in self.children)
             self.bbox = (minx, miny, maxx, maxy)
         else:
+            # Primero actualizar bbox de todos los hijos
             for child in self.children:
                 child.update_bbox()
             if not self.children:
                 self.bbox = (float('inf'), float('inf'), float('-inf'), float('-inf'))
                 return
+            # Luego calcular bbox que englobe todos los hijos
+            minx = min(child.bbox[0] for child in self.children)
+            miny = min(child.bbox[1] for child in self.children)
+            maxx = max(child.bbox[2] for child in self.children)
+            maxy = max(child.bbox[3] for child in self.children)
+            self.bbox = (minx, miny, maxx, maxy)
         
     def area(self):
         minx, miny, maxx, maxy = self.bbox
@@ -92,14 +99,15 @@ class RTree:
                 self._split_node(parent)
 
     def _find_parent(self, current, child):
-        if current.is_leaf or child in current.children:
+        if current.is_leaf:
             return None
         for c in current.children:
             if c == child:
                 return current
-            res = self._find_parent(c, child)
-            if res:
-                return res
+            if not c.is_leaf:  # Solo buscar recursivamente en nodos internos
+                res = self._find_parent(c, child)
+                if res:
+                    return res
         return None
 
     def search(self, rect):
@@ -119,8 +127,24 @@ class RTree:
                         rect[2] or child.bbox[3] < rect[1] or child.bbox[1] > rect[3]):
                     self._search_recursive(child, rect, results)        
     
-    def delete(self, rect, record):
+    def range_search_radio(self, point, radius):
+        # Range search within a circular area is not implemented in this basic R-Tree.
+        # This is a placeholder for potential future implementation.
+        results = []
+        pass
+
+    def range_search_k(self, point, k):
+        # k-nearest neighbors search is not implemented in this basic R-Tree.
+        # This is a placeholder for potential future implementation.
+        results = []
+        pass
+
+    def intersection_search(self, bbox):
+        pass
+
+    def delete(self, record_id):
         # Deletion in R-Trees is complex and often not implemented in basic versions.
         # This is a placeholder for potential future implementation.
         pass
 
+    
