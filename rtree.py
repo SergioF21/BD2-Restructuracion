@@ -143,8 +143,107 @@ class RTree:
         pass
 
     def delete(self, record_id):
-        # Deletion in R-Trees is complex and often not implemented in basic versions.
-        # This is a placeholder for potential future implementation.
-        pass
+        """Delete a record from the R-Tree"""
+        deleted_nodes = []
+        self._delete_recursive(self.root, record_id, deleted_nodes)
+        
+        # Reinsert orphaned entries from deleted nodes
+        for orphaned_entries in deleted_nodes:
+            for entry in orphaned_entries:
+                if len(entry) == 5:  # Leaf entry: (minx, miny, maxx, maxy, record)
+                    rect = (entry[0], entry[1], entry[2], entry[3])
+                    self.insert(rect, entry[4])
+                else:  # Internal node child
+                    self._reinsert_subtree(entry)
+        
+        # If root has only one child and is not a leaf, make child the new root
+        if not self.root.is_leaf and len(self.root.children) == 1:
+            self.root = self.root.children[0]
+    
+    def _delete_recursive(self, node, record_id, deleted_nodes):
+        """Recursively search and delete the record"""
+        if node.is_leaf:
+            # Remove matching records from leaf node
+            original_count = len(node.children)
+            node.children = [child for child in node.children if child[4] != record_id]
+            
+            if len(node.children) < original_count:
+                node.update_bbox()
+                # Check for underflow (less than m entries where m = max_children/2)
+                min_entries = max(1, self.max_children // 2)
+                if len(node.children) < min_entries and node != self.root:
+                    # Node underflows - it will be deleted and entries reinserted
+                    deleted_nodes.append(node.children[:])  # Save entries for reinsertion
+                    node.children = []  # Mark node as deleted
+                    return True
+            return len(node.children) < original_count
+        else:
+            # Internal node - search in children
+            nodes_to_remove = []
+            for i, child in enumerate(node.children):
+                if self._delete_recursive(child, record_id, deleted_nodes):
+                    # Child was modified or deleted
+                    if not child.children:  # Child node was deleted (empty)
+                        nodes_to_remove.append(i)
+            
+            # Remove deleted child nodes
+            for i in reversed(nodes_to_remove):
+                node.children.pop(i)
+            
+            if node.children:  # If node still has children
+                node.update_bbox()
+                # Check for underflow in internal node
+                min_entries = max(1, self.max_children // 2)
+                if len(node.children) < min_entries and node != self.root:
+                    # Save all child subtrees for reinsertion
+                    deleted_nodes.append(node.children[:])
+                    node.children = []  # Mark node as deleted
+                    return True
+            else:
+                # Node has no children left
+                return True
+            
+            return len(nodes_to_remove) > 0
+    
+    def _reinsert_subtree(self, subtree_root):
+        """Reinsert a subtree that was orphaned during deletion"""
+        if subtree_root.is_leaf:
+            # Reinsert all entries in this leaf
+            for entry in subtree_root.children:
+                rect = (entry[0], entry[1], entry[2], entry[3])
+                self.insert(rect, entry[4])
+        else:
+            # Recursively reinsert all subtrees
+            for child in subtree_root.children:
+                self._reinsert_subtree(child)
 
     
+if __name__ == "__main__":
+    rtree = RTree(max_children=4)
+    rtree.insert((1, 1, 2, 2), "A")
+    rtree.insert((2, 2, 3, 3), "B")
+    rtree.insert((3, 3, 4, 4), "C")
+    rtree.insert((5, 5, 6, 6), "D")
+    rtree.insert((7, 7, 8, 8), "E")
+    
+    print("Search (1.5,1.5,2.5,2.5):", rtree.search((1.5, 1.5, 2.5, 2.5)))
+    print("Search (6,6,7,7):", rtree.search((6, 6, 7, 7)))
+    
+    rtree.delete("B")
+    print("After deleting B:")
+    print("Search (1.5,1.5,2.5,2.5):", rtree.search((1.5, 1.5, 2.5, 2.5)))
+    print("Search (2.5,2.5,3.5,3.5):", rtree.search((2.5, 2.5, 3.5, 3.5)))
++    rtree = RTree(max_children=4)
++    rtree.insert((1, 1, 2, 2), "A")
++    rtree.insert((2, 2, 3, 3), "B")
++    rtree.insert((3, 3, 4, 4), "C")
++    rtree.insert((5, 5, 6, 6), "D")
++    rtree.insert((7, 7, 8, 8), "E")
++    print("Search (1.5,1.5,2.5,2.5    ):", rtree.search((1.5, 1.5, 2.5, 2.5)))
++    print("Search (6,6,7,7):", rtree.search((6, 6, 7, 7)))
++    rtree.delete("B")
++    print("After deleting B:")
++    print("Search (1.5,1.5,2.5,2     ):", rtree.search((1.5, 1.5, 2.5, 2.5)))
++    print("Search (2.5,2.5,3.5,3.5):", rtree.search((2.5, 2.5, 3.5, 3.5)))
++    print("Search (1.5,1.5,2.5,2.5):", rtree.search((1.5, 1.5, 2.5, 2.5)))
++    print("Search (2.5,2.5,3.5,3.5):", rtree.search((2.5, 2.5, 3.5, 3.5)))     
