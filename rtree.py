@@ -129,18 +129,61 @@ class RTree:
     
     def range_search_radio(self, point, radius):
         # Range search within a circular area is not implemented in this basic R-Tree.
-        # This is a placeholder for potential future implementation.
         results = []
-        pass
+        for child in self.root.children:
+            if isinstance(child, RTreeNode):
+                if (child.bbox[0] <= point[0] + radius and child.bbox[2] >= point[0] - radius and
+                    child.bbox[1] <= point[1] + radius and child.bbox[3] >= point[1] - radius):
+                    self._range_search_radio_recursive(child, point, radius, results)
+        return results
+    def _range_search_radio_recursive(self, node, point, radius, results):
+        if node.is_leaf:
+            for child in node.children:
+                cx = (child[0] + child[2]) / 2
+                cy = (child[1] + child[3]) / 2
+                if (cx - point[0]) ** 2 + (cy - point[1]) ** 2 <= radius ** 2:
+                    results.append(child[4])
+        else:
+            for child in node.children:
+                if (child.bbox[0] <= point[0] + radius and child.bbox[2] >= point[0] - radius and
+                    child.bbox[1] <= point[1] + radius and child.bbox[3] >= point[1] - radius):
+                    self._range_search_radio_recursive(child, point, radius, results)
 
     def range_search_k(self, point, k):
-        # k-nearest neighbors search is not implemented in this basic R-Tree.
-        # This is a placeholder for potential future implementation.
         results = []
-        pass
+        for child in self.root.children:
+            if isinstance(child, RTreeNode):
+                self._range_search_k_recursive(child, point, results)
+        return results[:k]
+
+    def _range_search_k_recursive(self, node, point, results):
+        if node.is_leaf:
+            for child in node.children:
+                cx = (child[0] + child[2]) / 2
+                cy = (child[1] + child[3]) / 2
+                dist = ((cx - point[0]) ** 2 + (cy - point[1]) ** 2) ** 0.5
+                results.append((dist, child[4]))
+            results.sort(key=lambda x: x[0])
+        else:
+            for child in node.children:
+                self._range_search_k_recursive(child, point, results)
 
     def intersection_search(self, bbox):
-        pass
+        results = []
+        self._intersection_search_recursive(self.root, bbox, results)
+        return results
+    
+    def _intersection_search_recursive(self, node, bbox, results):
+        if node.is_leaf:
+            for child in node.children:
+                if not (child[2] < bbox[0] or child[0] > bbox[2] or
+                        child[3] < bbox[1] or child[1] > bbox[3]):
+                    results.append(child[4])
+        else:
+            for child in node.children:
+                if not (child.bbox[2] < bbox[0] or child.bbox[0] > bbox[2] or
+                        child.bbox[3] < bbox[1] or child.bbox[1] > bbox[3]):
+                    self._intersection_search_recursive(child, bbox, results)
 
     def delete(self, record_id):
         """Delete a record from the R-Tree"""
