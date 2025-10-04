@@ -6,9 +6,13 @@ class RTreeNode:
     def __init__(self, node_id):
         self.is_leaf = False
         self.node_id = node_id
-        self.children = []
+        self.children = [] # List of child nodes pointers
+        self.point = None # For leaf nodes, store point data
         self.bbox = (float('inf'), float('inf'), float('-inf'), float('-inf'))  # (minx, miny, maxx, maxy)
     
+    def _point(self):
+        return self.point
+
     def min_xy(self):
         return (self.bbox[0], self.bbox[1])
     
@@ -59,7 +63,22 @@ class RTree:
         self.max_children = max_children
         self.node_count = 1  # To assign unique IDs to nodes
 
+    def is_empty(self):
+        return len(self.root.children) == 0
+
     def insert(self, rect, record):
+        """Insert a record given its bounding rect and payload.
+
+        rect: (minx, miny, maxx, maxy)
+        record: any payload or identifier
+        """
+        if self.root.is_leaf and len(self.root.children) == 0:
+            self.root.children.append((rect[0], rect[1], rect[2], rect[3], record))
+            self.root.update_bbox()
+        else:
+            self.insert_by_rect(rect, record)
+
+    def insert_by_rect(self, rect, record):
         leaf = self._choose_leaf(self.root, rect)
         leaf.children.append((rect[0], rect[1], rect[2], rect[3], record))
         leaf.update_bbox()
@@ -110,22 +129,22 @@ class RTree:
                     return res
         return None
 
-    def search(self, rect):
+    def search(self, key):
         results = []
-        self._search_recursive(self.root, rect, results)
+        self._search_recursive(self.root, key, results)
         return results
-
-    def _search_recursive(self, node, rect, results):
+    
+    def _search_recursive(self, node, key, results):
         if node.is_leaf:
             for child in node.children:
-                if not (child[2] < rect[0] or child[0] >
-                        rect[2] or child[3] < rect[1] or child[1] > rect[3]):
+                if not (child[2] < key[0] or child[0] > key[2] or
+                        child[3] < key[1] or child[1] > key[3]):
                     results.append(child[4])
         else:
             for child in node.children:
-                if not (child.bbox[2] < rect[0] or child.bbox[0] >
-                        rect[2] or child.bbox[3] < rect[1] or child.bbox[1] > rect[3]):
-                    self._search_recursive(child, rect, results)        
+                if not (child.bbox[2] < key[0] or child.bbox[0] > key[2] or
+                        child.bbox[3] < key[1] or child.bbox[1] > key[3]):
+                    self._search_recursive(child, key, results)
     
     def range_search_radio(self, point, radius):
         # Range search within a circular area is not implemented in this basic R-Tree.
@@ -185,10 +204,10 @@ class RTree:
                         child.bbox[3] < bbox[1] or child.bbox[1] > bbox[3]):
                     self._intersection_search_recursive(child, bbox, results)
 
-    def delete(self, record_id):
+    def delete(self, key):
         """Delete a record from the R-Tree"""
         deleted_nodes = []
-        self._delete_recursive(self.root, record_id, deleted_nodes)
+        self._delete_recursive(self.root, key, deleted_nodes)
         
         # Reinsert orphaned entries from deleted nodes
         for orphaned_entries in deleted_nodes:
@@ -262,31 +281,53 @@ class RTree:
 
     
 if __name__ == "__main__":
-    rtree = RTree(max_children=4)
-    rtree.insert((1, 1, 2, 2), "A")
-    rtree.insert((2, 2, 3, 3), "B")
-    rtree.insert((3, 3, 4, 4), "C")
-    rtree.insert((5, 5, 6, 6), "D")
-    rtree.insert((7, 7, 8, 8), "E")
-    
-    print("Search (1.5,1.5,2.5,2.5):", rtree.search((1.5, 1.5, 2.5, 2.5)))
-    print("Search (6,6,7,7):", rtree.search((6, 6, 7, 7)))
-    
-    rtree.delete("B")
-    print("After deleting B:")
-    print("Search (1.5,1.5,2.5,2.5):", rtree.search((1.5, 1.5, 2.5, 2.5)))
-    print("Search (2.5,2.5,3.5,3.5):", rtree.search((2.5, 2.5, 3.5, 3.5)))
-+    rtree = RTree(max_children=4)
-+    rtree.insert((1, 1, 2, 2), "A")
-+    rtree.insert((2, 2, 3, 3), "B")
-+    rtree.insert((3, 3, 4, 4), "C")
-+    rtree.insert((5, 5, 6, 6), "D")
-+    rtree.insert((7, 7, 8, 8), "E")
-+    print("Search (1.5,1.5,2.5,2.5    ):", rtree.search((1.5, 1.5, 2.5, 2.5)))
-+    print("Search (6,6,7,7):", rtree.search((6, 6, 7, 7)))
-+    rtree.delete("B")
-+    print("After deleting B:")
-+    print("Search (1.5,1.5,2.5,2     ):", rtree.search((1.5, 1.5, 2.5, 2.5)))
-+    print("Search (2.5,2.5,3.5,3.5):", rtree.search((2.5, 2.5, 3.5, 3.5)))
-+    print("Search (1.5,1.5,2.5,2.5):", rtree.search((1.5, 1.5, 2.5, 2.5)))
-+    print("Search (2.5,2.5,3.5,3.5):", rtree.search((2.5, 2.5, 3.5, 3.5)))     
+    # Quick self-tests placed here so the file is runnable
+    def basic_test():
+        print("=== Basic R-Tree test ===")
+        t = RTree(max_children=4)
+        t.insert((1, 1, 2, 2), "A")
+        t.insert((2, 2, 3, 3), "B")
+        t.insert((3, 3, 4, 4), "C")
+        t.insert((5, 5, 6, 6), "D")
+        t.insert((7, 7, 8, 8), "E")
+
+        print("Search (1.5,1.5,2.5,2.5):", t.search((1.5, 1.5, 2.5, 2.5)))
+        print("Search (6,6,7,7):", t.search((6, 6, 7, 7)))
+
+        t.delete("B")
+        print("After deleting B:")
+        print("Search (1.5,1.5,2.5,2.5):", t.search((1.5, 1.5, 2.5, 2.5)))
+        print("Search (2.5,2.5,3.5,3.5):", t.search((2.5, 2.5, 3.5, 3.5)))
+
+    def underflow_test():
+        print("\n=== Underflow test ===")
+        t = RTree(max_children=2)
+        # insert small grid
+        recs = []
+        for i in range(3):
+            for j in range(3):
+                r = (i, j, i + 0.4, j + 0.4)
+                name = f"p_{i}_{j}"
+                recs.append(name)
+                t.insert(r, name)
+
+        print("Total before deletions:", len(t.search((-1, -1, 10, 10))))
+        # delete some
+        for name in recs[:4]:
+            t.delete(name)
+        print("Total after deletions:", len(t.search((-1, -1, 10, 10))))
+
+    def root_restructure_test():
+        print("\n=== Root restructure test ===")
+        t = RTree(max_children=2)
+        t.insert((0, 0, 1, 1), "A")
+        t.insert((10, 10, 11, 11), "B")
+        t.insert((20, 20, 21, 21), "C")
+        print("Before deletions - total:", len(t.search((-1, -1, 30, 30))))
+        t.delete("A")
+        t.delete("B")
+        print("After deletions - total:", len(t.search((-1, -1, 30, 30))))
+
+    basic_test()
+    underflow_test()
+    root_restructure_test()
