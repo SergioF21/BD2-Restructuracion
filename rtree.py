@@ -1,25 +1,47 @@
 import struct
 
 M = 4 # DEFAULT MAX CHILDREN PER NODE
+m = M // 2 # MINIMUM CHILDREN PER NODE
 
 class RTreeNode:
-    def __init__(self, node_id):
-        self.is_leaf = False
-        self.node_id = node_id
-        self.children = [] # List of child nodes pointers
-        self.point = None # For leaf nodes, store point data
+    def __init__(self, node_id, is_leaf=False):
+        self.is_leaf = is_leaf # True if leaf node, False if internal node
+        self.node_id = node_id # Unique identifier for the node
+        self.children = [] # List of child nodes pointers (Rectangles) or entries (Point data) 
         self.bbox = (float('inf'), float('inf'), float('-inf'), float('-inf'))  # (minx, miny, maxx, maxy)
-    
-    def _point(self):
-        return self.point
 
-    def min_xy(self):
+    def is_leaf_node(self):
+        """Check if the node is a leaf node."""
+        return self.is_leaf
+
+    def min_xy(self): 
+        """Return the minimum point(x,y) = minx, miny.""" # (left-bottom corner)
         return (self.bbox[0], self.bbox[1])
     
-    def max_xy(self):
+    def max_xy(self): 
+        """Return the maximum point(x,y) = maxx, maxy.""" # (right-top corner)
         return (self.bbox[2], self.bbox[3])
 
+    def mindist_to_point(self, point):
+        """Calculate the minimum distance from the bounding box to a point."""
+        px, py = point
+        minx, miny, maxx, maxy = self.bbox
+        if px < minx:
+            dx = minx - px
+        elif px > maxx:
+            dx = px - maxx
+        else:
+            dx = 0
+        if py < miny:
+            dy = miny - py
+        elif py > maxy:
+            dy = py - maxy
+        else:
+            dy = 0
+        return (dx * dx + dy * dy) ** 0.5 # Euclidean distance to the nearest edge or corner
+
     def update_bbox(self):
+        """Update the bounding box to enclose all children."""
         if self.is_leaf:
             if not self.children:
                 self.bbox = (float('inf'), float('inf'), float('-inf'), float('-inf'))
@@ -44,10 +66,12 @@ class RTreeNode:
             self.bbox = (minx, miny, maxx, maxy)
         
     def area(self):
+        """Calculate the area of the bounding box."""
         minx, miny, maxx, maxy = self.bbox
         return (maxx - minx) * (maxy - miny)
     
     def enlarged_area(self, rect):
+        """Calculate the area increase if this node's bbox were to include rect."""
         minx, miny, maxx, maxy = self.bbox
         rminx, rminy, rmaxx, rmaxy = rect
         new_minx = min(minx, rminx)
@@ -89,7 +113,11 @@ class RTree:
         if node.is_leaf:
             return node
         else:
-            best_child = min(node.children, key=lambda child: child.enlarged_area(rect))
+            rect_center = ((rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2)
+            def score(child):
+                #child is RTreeNode
+                return (child.enlarged_area(rect), child.mindist_to_point(rect_center))
+            best_child = min(node.children, key = score) # Choose child that requires least enlargement and is closest
             return self._choose_leaf(best_child, rect)
     
     def _split_node(self, node):
@@ -147,15 +175,29 @@ class RTree:
                     self._search_recursive(child, key, results)
     
     def range_search_radio(self, point, radius):
-        # Range search within a circular area is not implemented in this basic R-Tree.
+        """Range search within a circular area using bbox mindist pruning."""
         results = []
-        for child in self.root.children:
-            if isinstance(child, RTreeNode):
-                if (child.bbox[0] <= point[0] + radius and child.bbox[2] >= point[0] - radius and
-                    child.bbox[1] <= point[1] + radius and child.bbox[3] >= point[1] - radius):
-                    self._range_search_radio_recursive(child, point, radius, results)
+        def rect_mindist(child):
+            return child.mindist_to_point(point)
+        def recurse(node):
+            if isinstance(node, RTreeNode):
+                if node.mindist_to_point(point) > radius:
+                    return 
+                if node.is_leaf:
+                    for child in node.children:
+                        if rect_mindist(child) <= radius:
+                            results.append(child[4])
+                else:
+                    for child in node.children:
+                        if rect_mindist(child) <= radius:
+                            recurse(child)
+            else:
+                return
+        recurse(self.root)
         return results
+    """    
     def _range_search_radio_recursive(self, node, point, radius, results):
+        # kept for compatibility; not used by main method above
         if node.is_leaf:
             for child in node.children:
                 cx = (child[0] + child[2]) / 2
@@ -168,13 +210,29 @@ class RTree:
                     child.bbox[1] <= point[1] + radius and child.bbox[3] >= point[1] - radius):
                     self._range_search_radio_recursive(child, point, radius, results)
 
-    def range_search_k(self, point, k):
-        results = []
-        for child in self.root.children:
-            if isinstance(child, RTreeNode):
-                self._range_search_k_recursive(child, point, results)
-        return results[:k]
+    """
 
+    def range_search_k(self, point, k):
+        """Range search for the k nearest neighbors to a point."""
+        results = []
+        def recurse(node):
+            if node.is_leaf:
+                for child in node.children:
+                    cx = (child[0] + child[2]) / 2.0
+                    cy = (child[1] + child[3]) / 2.0
+                    dist = ((cx - point[0]) ** 2 + (cy - point[1]) ** 2) ** 0.5
+                    results.append((dist, child[4]))
+                results.sort(key=lambda x: x[0])
+            else:
+                mindists = [(child.mindist_to_point(point), child) for child in node.children]
+                mindists.sort(key=lambda x: x[0])
+                for _, child in mindists:
+                    recurse(child)
+                    if len(results) >= k:
+                        break
+        recurse(self.root)
+        return [r for _, r in results[:k]]
+    """
     def _range_search_k_recursive(self, node, point, results):
         if node.is_leaf:
             for child in node.children:
@@ -184,9 +242,11 @@ class RTree:
                 results.append((dist, child[4]))
             results.sort(key=lambda x: x[0])
         else:
-            for child in node.children:
-                self._range_search_k_recursive(child, point, results)
-
+            # traverse children in increasing mindist order
+            ordered = sorted(node.children, key=lambda c: c.mindist_to_point(point))
+            for ch in ordered:
+                self._range_search_k_recursive(ch, point, results)
+    """
     def intersection_search(self, bbox):
         results = []
         self._intersection_search_recursive(self.root, bbox, results)
