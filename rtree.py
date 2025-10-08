@@ -177,22 +177,23 @@ class RTree:
     def range_search_radio(self, point, radius):
         """Range search within a circular area using bbox mindist pruning."""
         results = []
-        def rect_mindist(child):
-            return child.mindist_to_point(point)
+        def rect_tuple_mindist(rect, point):
+            px, py = point
+            minx, miny, maxx, maxy = rect[0], rect[1], rect[2], rect[3]
+            dx = 0 if minx <= px <= maxx else min(abs(px - minx), abs(px - maxx))
+            dy = 0 if miny <= py <= maxy else min(abs(py - miny), abs(py - maxy))
+            return (dx * dx + dy * dy) ** 0.5
         def recurse(node):
-            if isinstance(node, RTreeNode):
-                if node.mindist_to_point(point) > radius:
-                    return 
-                if node.is_leaf:
-                    for child in node.children:
-                        if rect_mindist(child) <= radius:
-                            results.append(child[4])
-                else:
-                    for child in node.children:
-                        if rect_mindist(child) <= radius:
-                            recurse(child)
+            if node.mindist_to_point(point) > radius:
+                return 
+            if node.is_leaf:
+                for child in node.children:
+                    if rect_tuple_mindist(child, point) <= radius:
+                        results.append(child[4])
             else:
-                return
+                for child in node.children:
+                    if child.mindist_to_point(point) <= radius:
+                        recurse(child)
         recurse(self.root)
         return results
     """    
@@ -272,12 +273,14 @@ class RTree:
         # Reinsert orphaned entries from deleted nodes
         for orphaned_entries in deleted_nodes:
             for entry in orphaned_entries:
-                if len(entry) == 5:  # Leaf entry: (minx, miny, maxx, maxy, record)
+                if isinstance(entry, RTreeNode):
+                    # Reinsert subtrees
+                    self._reinsert_subtree(entry)
+                else:
+                    # Leaf entry: (minx, miny, maxx, maxy, record)
                     rect = (entry[0], entry[1], entry[2], entry[3])
                     self.insert(rect, entry[4])
-                else:  # Internal node child
-                    self._reinsert_subtree(entry)
-        
+
         # If root has only one child and is not a leaf, make child the new root
         if not self.root.is_leaf and len(self.root.children) == 1:
             self.root = self.root.children[0]
