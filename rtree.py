@@ -4,9 +4,10 @@ M = 4 # DEFAULT MAX CHILDREN PER NODE
 m = M // 2 # MINIMUM CHILDREN PER NODE
 
 class RTreeNode:
-    def __init__(self, node_id, is_leaf=False):
+    def __init__(self, node_id, is_leaf=False, M_max = M):
         self.is_leaf = is_leaf # True if leaf node, False if internal node
         self.node_id = node_id # Unique identifier for the node
+        self.size = 0  # Current number of children
         self.children = [] # List of child nodes pointers (Rectangles) or entries (Point data) 
         self.bbox = (float('inf'), float('inf'), float('-inf'), float('-inf'))  # (minx, miny, maxx, maxy)
 
@@ -88,16 +89,17 @@ class RTree:
         self.node_count = 1  # To assign unique IDs to nodes
 
     def is_empty(self):
-        return len(self.root.children) == 0
+        return self.root.is_leaf and len(self.root.children) == 0
 
     def insert(self, rect, record):
         """Insert a record given its bounding rect and payload.
 
-        rect: (minx, miny, maxx, maxy)
+        rect --> rectangle: (minx, miny, maxx, maxy)
         record: any payload or identifier
         """
-        if self.root.is_leaf and len(self.root.children) == 0:
+        if self.root.is_leaf and self.root.size == 0:
             self.root.children.append((rect[0], rect[1], rect[2], rect[3], record))
+            self.root.size = 1
             self.root.update_bbox()
         else:
             self.insert_by_rect(rect, record)
@@ -106,8 +108,9 @@ class RTree:
         """Insert a record into the R-Tree based on its bounding rectangle."""
         leaf = self._choose_leaf(self.root, rect)
         leaf.children.append((rect[0], rect[1], rect[2], rect[3], record))
+        leaf.size += 1
         leaf.update_bbox()
-        if len(leaf.children) > self.max_children:
+        if leaf.size > self.max_children:
             self._split_node(leaf)
     
     def _choose_leaf(self, node, rect):
@@ -124,12 +127,19 @@ class RTree:
     
     def _split_node(self, node):
         """Split a node that has exceeded max_children."""
-        mid = len(node.children) // 2
+        k = node.size
+        # mínimo de entradas por nodo (ceil(M/2))
+        min_fill = max(1, (self.max_children + 1) // 2)
+        # elegir índice de corte garantizando que ambos lados tengan >= min_fill
+        mid = max(min_fill, min(k // 2, k - min_fill))
         new_node = RTreeNode(self.node_count)
         self.node_count += 1
         new_node.is_leaf = node.is_leaf
         new_node.children = node.children[mid:]
         node.children = node.children[:mid]
+
+        node.size = len(node.children)
+        new_node.size = len(new_node.children)
         
         node.update_bbox()
         new_node.update_bbox()
@@ -139,13 +149,15 @@ class RTree:
             self.node_count += 1
             new_root.is_leaf = False
             new_root.children = [node, new_node]
+            new_root.size = 2
             new_root.update_bbox()
             self.root = new_root
         else:
             parent = self._find_parent(self.root, node)
             parent.children.append(new_node)
+            parent.size += 1
             parent.update_bbox()
-            if len(parent.children) > self.max_children:
+            if parent.size > self.max_children:
                 self._split_node(parent)
 
     def _find_parent(self, current, child):
@@ -257,24 +269,25 @@ class RTree:
                     self.insert(rect, entry[4])
 
         # If root has only one child and is not a leaf, make child the new root
-        if not self.root.is_leaf and len(self.root.children) == 1:
+        if not self.root.is_leaf and self.root.size == 1:
             self.root = self.root.children[0]
     
     def _delete_recursive(self, node, record_id, deleted_nodes):
         """Recursively search and delete the record"""
         if node.is_leaf:
             # Remove matching records from leaf node
-            original_count = len(node.children)
+            original_count = node.size
             node.children = [child for child in node.children if child[4] != record_id]
-            
-            if len(node.children) < original_count:
+            node.size = len(node.children)
+            if node.size < original_count:
                 node.update_bbox()
                 # Check for underflow (less than m entries where m = max_children/2)
                 min_entries = max(1, self.max_children // 2)
-                if len(node.children) < min_entries and node != self.root:
+                if node.size < min_entries and node != self.root:
                     # Node underflows - it will be deleted and entries reinserted
                     deleted_nodes.append(node.children[:])  # Save entries for reinsertion
                     node.children = []  # Mark node as deleted
+                    node.size = 0
                     return True
             return len(node.children) < original_count
         else:
@@ -289,15 +302,17 @@ class RTree:
             # Remove deleted child nodes
             for i in reversed(nodes_to_remove):
                 node.children.pop(i)
+                node.size -= 1
             
-            if node.children:  # If node still has children
+            if node.size:  # If node still has children
                 node.update_bbox()
                 # Check for underflow in internal node
                 min_entries = max(1, self.max_children // 2)
-                if len(node.children) < min_entries and node != self.root:
+                if node.size < min_entries and node != self.root:
                     # Save all child subtrees for reinsertion
                     deleted_nodes.append(node.children[:])
                     node.children = []  # Mark node as deleted
+                    node.size = 0
                     return True
             else:
                 # Node has no children left
