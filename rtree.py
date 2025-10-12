@@ -103,6 +103,7 @@ class RTree:
             self.insert_by_rect(rect, record)
 
     def insert_by_rect(self, rect, record):
+        """Insert a record into the R-Tree based on its bounding rectangle."""
         leaf = self._choose_leaf(self.root, rect)
         leaf.children.append((rect[0], rect[1], rect[2], rect[3], record))
         leaf.update_bbox()
@@ -110,6 +111,7 @@ class RTree:
             self._split_node(leaf)
     
     def _choose_leaf(self, node, rect):
+        """Choose the appropriate leaf node for insertion."""
         if node.is_leaf:
             return node
         else:
@@ -121,6 +123,7 @@ class RTree:
             return self._choose_leaf(best_child, rect)
     
     def _split_node(self, node):
+        """Split a node that has exceeded max_children."""
         mid = len(node.children) // 2
         new_node = RTreeNode(self.node_count)
         self.node_count += 1
@@ -158,6 +161,7 @@ class RTree:
         return None
 
     def search(self, key):
+        """Search for all records that intersect the given bounding box."""
         results = []
         self._search_recursive(self.root, key, results)
         return results
@@ -196,22 +200,6 @@ class RTree:
                         recurse(child)
         recurse(self.root)
         return results
-    """    
-    def _range_search_radio_recursive(self, node, point, radius, results):
-        # kept for compatibility; not used by main method above
-        if node.is_leaf:
-            for child in node.children:
-                cx = (child[0] + child[2]) / 2
-                cy = (child[1] + child[3]) / 2
-                if (cx - point[0]) ** 2 + (cy - point[1]) ** 2 <= radius ** 2:
-                    results.append(child[4])
-        else:
-            for child in node.children:
-                if (child.bbox[0] <= point[0] + radius and child.bbox[2] >= point[0] - radius and
-                    child.bbox[1] <= point[1] + radius and child.bbox[3] >= point[1] - radius):
-                    self._range_search_radio_recursive(child, point, radius, results)
-
-    """
 
     def range_search_k(self, point, k):
         """Range search for the k nearest neighbors to a point."""
@@ -233,22 +221,9 @@ class RTree:
                         break
         recurse(self.root)
         return [r for _, r in results[:k]]
-    """
-    def _range_search_k_recursive(self, node, point, results):
-        if node.is_leaf:
-            for child in node.children:
-                cx = (child[0] + child[2]) / 2
-                cy = (child[1] + child[3]) / 2
-                dist = ((cx - point[0]) ** 2 + (cy - point[1]) ** 2) ** 0.5
-                results.append((dist, child[4]))
-            results.sort(key=lambda x: x[0])
-        else:
-            # traverse children in increasing mindist order
-            ordered = sorted(node.children, key=lambda c: c.mindist_to_point(point))
-            for ch in ordered:
-                self._range_search_k_recursive(ch, point, results)
-    """
+
     def intersection_search(self, bbox):
+        """Search for all records intersecting the given bounding box."""
         results = []
         self._intersection_search_recursive(self.root, bbox, results)
         return results
