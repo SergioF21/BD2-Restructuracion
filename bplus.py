@@ -1,3 +1,8 @@
+import pickle
+import os
+import struct
+from typing import List, Any, Optional
+
 class BPlusTreeNode:
     def __init__(self, order, is_leaf=False):
         self.order = order
@@ -5,16 +10,97 @@ class BPlusTreeNode:
         self.keys = []
         self.children = []
         self.next = None  # Para enlazar hojas
+        self.node_id = None  # ID único para persistencia
+
+
+class BPlusTreePersistence:
+    """Maneja la persistencia del árbol B+ en memoria secundaria."""
+    
+    def __init__(self, index_filename: str):
+        self.index_filename = index_filename
+        self.node_counter = 0
+    
+    def _generate_node_id(self) -> int:
+        """Genera un ID único para cada nodo."""
+        self.node_counter += 1
+        return self.node_counter
+    
+    def _assign_node_ids(self, node: BPlusTreeNode):
+        """Asigna IDs únicos a todos los nodos del árbol."""
+        if node.node_id is None:
+            node.node_id = self._generate_node_id()
+        
+        if not node.is_leaf:
+            for child in node.children:
+                if isinstance(child, BPlusTreeNode):
+                    self._assign_node_ids(child)
+    
+    def save_tree(self, tree: 'BPlusTree'):
+        """Guarda el árbol B+ completo en un archivo."""
+        # Asignar IDs a todos los nodos
+        self._assign_node_ids(tree.root)
+        
+        # Serializar el árbol
+        tree_data = {
+            'root': tree.root,
+            'order': tree.order,
+            'node_counter': self.node_counter
+        }
+        
+        with open(self.index_filename, 'wb') as f:
+            pickle.dump(tree_data, f)
+    
+    def load_tree(self) -> Optional['BPlusTree']:
+        """Carga el árbol B+ desde un archivo."""
+        if not os.path.exists(self.index_filename):
+            return None
+        
+        try:
+            with open(self.index_filename, 'rb') as f:
+                tree_data = pickle.load(f)
+            
+            tree = BPlusTree(tree_data['order'])
+            tree.root = tree_data['root']
+            self.node_counter = tree_data.get('node_counter', 0)
+            
+            return tree
+        except Exception as e:
+            print(f"Error al cargar el árbol B+: {e}")
+            return None
 
 
 class BPlusTree:
-    def __init__(self, order=4):
+    def __init__(self, order=4, index_filename: str = None):
         self.root = BPlusTreeNode(order, is_leaf=True)
         self.order = order
+        self.persistence = BPlusTreePersistence(index_filename) if index_filename else None
+        self._auto_save = True  # Guardar automáticamente después de cada operación
 
     def is_empty(self):
         """Check if the BPlus tree is empty."""
         return len(self.root.keys) == 0
+    
+    def load_from_file(self):
+        """Carga el árbol desde el archivo de persistencia."""
+        if self.persistence:
+            loaded_tree = self.persistence.load_tree()
+            if loaded_tree:
+                self.root = loaded_tree.root
+                self.order = loaded_tree.order
+                if loaded_tree.persistence:
+                    self.persistence.node_counter = loaded_tree.persistence.node_counter
+                return True
+        return False
+    
+    def save_to_file(self):
+        """Guarda el árbol en el archivo de persistencia."""
+        if self.persistence:
+            self.persistence.save_tree(self)
+    
+    def _auto_save_if_enabled(self):
+        """Guarda automáticamente si está habilitado."""
+        if self._auto_save and self.persistence:
+            self.save_to_file()
 
     # -------------------------------
     # BÚSQUEDA
@@ -65,6 +151,9 @@ class BPlusTree:
             new_root.keys = [new_child[0]]
             new_root.children = [root, new_child[1]]
             self.root = new_root
+        
+        # Guardar automáticamente después de la inserción
+        self._auto_save_if_enabled()
 
     def _insert_recursive(self, node, key, pos):
         if node.is_leaf:
@@ -100,6 +189,8 @@ class BPlusTree:
         """Update the position for an existing key."""
         if self.search(key) is not None:
             self._update_recursive(self.root, key, pos)
+            # Guardar automáticamente después de la actualización
+            self._auto_save_if_enabled()
         else:
             # If key doesn't exist, insert it
             self.insert(key, pos)
@@ -150,6 +241,9 @@ class BPlusTree:
         # si la raíz se queda sin claves y no es hoja, se baja un nivel
         if not self.root.is_leaf and len(self.root.keys) == 0:
             self.root = self.root.children[0]
+        
+        # Guardar automáticamente después de la eliminación
+        self._auto_save_if_enabled()
 
     def _delete_recursive(self, node, key):
         if node.is_leaf:

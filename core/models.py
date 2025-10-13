@@ -21,18 +21,9 @@ class Table:
         self.format_string = self._generate_format_string()
 
     def _calculate_record_size(self) -> int:
-        size = 0
-        for field in self.fields:
-            if field.data_type == int:
-                size += 4  # cuatro bytes para enteros?
-            elif field.data_type == float:
-                size += 8  # ocho bytes para floats?
-            elif field.data_type == str:
-                size += field.size
-            else:
-                raise ValueError(f"Tipo de dato no soportado: {field.data_type}")
-            
-        return size + 4 # 4 bytes para el next
+        # Usar struct.calcsize para obtener el tamaño real con padding
+        format_string = self._generate_format_string()
+        return struct.calcsize(format_string)
     
     def _generate_format_string(self) -> str:  ## lo necesitamos para que struct funcione (por ejemplo "i10s" para un int y un string de 10 caracteres)
         parseStruct = ""
@@ -75,15 +66,14 @@ class Record:
     def unpack(table: Table, data: bytes) -> 'Record':
         unpacked_values = list(struct.unpack(table.format_string, data))
         values = []
-        for i, fields in enumerate(table.fields):
-            values = unpacked_values[i]
-            if fields.data_type == str:
-                values.append(values.decode('utf-8').rstrip('\x00'))
-                values.append(values)
+        for i, field in enumerate(table.fields):
+            value = unpacked_values[i]
+            if field.data_type == str:
+                values.append(value.decode('utf-8').rstrip('\x00'))
             else:
-                values.append(values)
+                values.append(value)
         next_ptr = unpacked_values[-1]
-        record = Record(table, values, next = next_ptr)
+        record = Record(table, values, next=next_ptr)
         return record
     def __repr__(self) -> str:
         return f"Record(pos={self.pos}, values={self.values}, next={self.next}, pos={self.pos})"

@@ -84,6 +84,11 @@ class FileManager:
             return None
 
     def _write_record_at_pos(self, record: Record, pos: int):
+        # Crear el archivo si no existe
+        if not os.path.exists(self.filename):
+            with open(self.filename, 'wb') as f:
+                pass  # Crear archivo vacío
+        
         with open(self.filename, 'r+b') as f:
             offset = self._get_byte_offset(pos)
             f.seek(offset)
