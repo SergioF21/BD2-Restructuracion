@@ -91,7 +91,7 @@ class RTree:
     def is_empty(self):
         return self.root.is_leaf and len(self.root.children) == 0
 
-    def insert(self, rect, record):
+    def insert(self, record, rect):
         """Insert a record given its bounding rect and payload.
 
         rect --> rectangle: (minx, miny, maxx, maxy)
@@ -272,12 +272,12 @@ class RTree:
         if not self.root.is_leaf and self.root.size == 1:
             self.root = self.root.children[0]
     
-    def _delete_recursive(self, node, record_id, deleted_nodes):
+    def _delete_recursive(self, node, key, deleted_nodes):
         """Recursively search and delete the record"""
         if node.is_leaf:
             # Remove matching records from leaf node
             original_count = node.size
-            node.children = [child for child in node.children if child[4] != record_id]
+            node.children = [child for child in node.children if child[4] != key]
             node.size = len(node.children)
             if node.size < original_count:
                 node.update_bbox()
@@ -294,7 +294,7 @@ class RTree:
             # Internal node - search in children
             nodes_to_remove = []
             for i, child in enumerate(node.children):
-                if self._delete_recursive(child, record_id, deleted_nodes):
+                if self._delete_recursive(child, key, deleted_nodes):
                     # Child was modified or deleted
                     if not child.children:  # Child node was deleted (empty)
                         nodes_to_remove.append(i)
@@ -322,7 +322,7 @@ class RTree:
     
     def _reinsert_subtree(self, subtree_root):
         """Reinsert a subtree that was orphaned during deletion"""
-        if subtree_root.is_leaf:
+        if subtree_root.is_leaf_node():
             # Reinsert all entries in this leaf
             for entry in subtree_root.children:
                 rect = (entry[0], entry[1], entry[2], entry[3])
