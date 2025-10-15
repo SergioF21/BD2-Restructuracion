@@ -408,7 +408,47 @@ if __name__ == "__main__":
         t.delete("A")
         t.delete("B")
         print("After deletions - total:", len(t.search((-1, -1, 30, 30))))
+
+    def range_radio_test():
+        print("\n=== range_search_radio test ===")
+        t = RTree(max_children=4)
+        t.insert(("A", 1, 1))
+        t.insert(("B", 2, 2))
+        t.insert(("C", 3, 3))
+        t.insert(("D", 5, 5))
+        # circle centered at (2,2) radius 1.1 -> should include B only
+        res = t.range_search_radio((2, 2), 1.1)
+        print("range_search_radio((2,2),1.1):", res)
+        assert "B" in res and "A" not in res
+
+    def knn_test():
+        print("\n=== range_search_k (k-NN) test ===")
+        t = RTree(max_children=4)
+        t.insert(("A", 1, 1))
+        t.insert(("B", 2, 2))
+        t.insert(("C", 3, 3))
+        t.insert(("D", 5, 5))
+        # nearest 2 to (2.1,2.1) should be B and C (in that order)
+        res = t.range_search_k((2.1, 2.1), 2)
+        print("range_search_k((2.1,2.1),2):", res)
+        assert res and res[0] == "B"
+
+    def intersection_test():
+        print("\n=== intersection_search test ===")
+        t = RTree(max_children=4)
+        t.insert(("A", 1, 1))
+        t.insert(("B", 2, 2))
+        t.insert(("C", 3, 3))
+        t.insert(("D", 5, 5))
+        # bbox (1.5,1.5,3.5,3.5) should intersect B and C
+        res = t.intersection_search((1.5, 1.5, 3.5, 3.5))
+        print("intersection_search((1.5,1.5,3.5,3.5)):", res)
+        assert "B" in res and "C" in res
+
     basic_test()
     underflow_test()
     root_restructure_test()
-    root_restructure_test()
+    # additional tests for spatial queries
+    range_radio_test()
+    knn_test()
+    intersection_test()
