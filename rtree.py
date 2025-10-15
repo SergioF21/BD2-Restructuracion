@@ -3,12 +3,14 @@ import struct
 M = 4 # DEFAULT MAX CHILDREN PER NODE
 m = M // 2 # MINIMUM CHILDREN PER NODE
 
+# record: id, x, y
+
 class RTreeNode:
-    def __init__(self, node_id, is_leaf=False, M_max = M):
+    def __init__(self, node_id, is_leaf=False):
         self.is_leaf = is_leaf # True if leaf node, False if internal node
         self.node_id = node_id # Unique identifier for the node
         self.size = 0  # Current number of children
-        self.children = [] # List of child nodes pointers (Rectangles) or entries (Point data) 
+        self.children = [] # List of child nodes pointers (Rectangles (minx,miny,maxx,maxy)) or entries (Point data (x,x,y,y)) 
         self.bbox = (float('inf'), float('inf'), float('-inf'), float('-inf'))  # (minx, miny, maxx, maxy)
 
     def is_leaf_node(self):
@@ -89,24 +91,39 @@ class RTree:
         self.node_count = 1  # To assign unique IDs to nodes
 
     def is_empty(self):
-        return self.root.is_leaf and len(self.root.children) == 0
+        return self.root.is_leaf and self.root.size == 0
 
-    def insert(self, record, rect):
-        """Insert a record given its bounding rect and payload.
+    def insert(self, record):
+        """Insert a record given the record we want to add.
 
-        rect --> rectangle: (minx, miny, maxx, maxy)
-        record: any payload or identifier
+        Supported formats:
+        - point record: (id, x, y)  -> stored as degenerate rect (x,y,x,y)
+        - leaf entry (legacy): (minx, miny, maxx, maxy, id)
         """
+        
+        # Normalize incoming record to (rect_tuple, payload)
+        if isinstance(record, tuple) and len(record) == 3:
+            # (id, x, y)
+            payload, x, y = record
+            rect = (x, y, x, y)
+        elif isinstance(record, tuple) and len(record) == 5:
+            # legacy leaf entry (minx, miny, maxx, maxy, id)
+            rect = (record[0], record[1], record[2], record[3])
+            payload = record[4]
+        else:
+            raise ValueError("insert expects (id,x,y) or (minx,miny,maxx,maxy,id)")
+
         if self.root.is_leaf and self.root.size == 0:
-            self.root.children.append((rect[0], rect[1], rect[2], rect[3], record))
+            self.root.children.append((rect[0], rect[1], rect[2], rect[3], payload))
             self.root.size = 1
             self.root.update_bbox()
         else:
-            self.insert_by_rect(rect, record)
+            self.insert_by_rect(rect, payload)
 
     def insert_by_rect(self, rect, record):
         """Insert a record into the R-Tree based on its bounding rectangle."""
         leaf = self._choose_leaf(self.root, rect)
+        # store as leaf entry: (minx, miny, maxx, maxy, payload)
         leaf.children.append((rect[0], rect[1], rect[2], rect[3], record))
         leaf.size += 1
         leaf.update_bbox()
@@ -261,16 +278,21 @@ class RTree:
         for orphaned_entries in deleted_nodes:
             for entry in orphaned_entries:
                 if isinstance(entry, RTreeNode):
-                    # Reinsert subtrees
+                    # Reinsert subtree
                     self._reinsert_subtree(entry)
                 else:
-                    # Leaf entry: (minx, miny, maxx, maxy, record)
-                    rect = (entry[0], entry[1], entry[2], entry[3])
-                    self.insert(rect, entry[4])
-
+                    # Leaf entry: (minx, miny, maxx, maxy, payload)
+                    minx, miny, maxx, maxy, payload = entry
+                    # If degenerate (point) reinsert via insert(record)
+                    if minx == maxx and miny == maxy:
+                        self.insert((payload, minx, miny))
+                    else:
+                        # reinserción como rect original
+                        self.insert_by_rect((minx, miny, maxx, maxy), payload)
+ 
         # If root has only one child and is not a leaf, make child the new root
         if not self.root.is_leaf and self.root.size == 1:
-            self.root = self.root.children[0]
+             self.root = self.root.children[0]
     
     def _delete_recursive(self, node, key, deleted_nodes):
         """Recursively search and delete the record"""
@@ -325,8 +347,11 @@ class RTree:
         if subtree_root.is_leaf_node():
             # Reinsert all entries in this leaf
             for entry in subtree_root.children:
-                rect = (entry[0], entry[1], entry[2], entry[3])
-                self.insert(rect, entry[4])
+                minx, miny, maxx, maxy, payload = entry
+                if minx == maxx and miny == maxy:
+                    self.insert((payload, minx, miny))
+                else:
+                    self.insert_by_rect((minx, miny, maxx, maxy), payload)
         else:
             # Recursively reinsert all subtrees
             for child in subtree_root.children:
@@ -338,11 +363,12 @@ if __name__ == "__main__":
     def basic_test():
         print("=== Basic R-Tree test ===")
         t = RTree(max_children=4)
-        t.insert((1, 1, 2, 2), "A")
-        t.insert((2, 2, 3, 3), "B")
-        t.insert((3, 3, 4, 4), "C")
-        t.insert((5, 5, 6, 6), "D")
-        t.insert((7, 7, 8, 8), "E")
+        # insert as (id, x, y)
+        t.insert(("A", 1, 1))
+        t.insert(("B", 2, 2))
+        t.insert(("C", 3, 3))
+        t.insert(("D", 5, 5))
+        t.insert(("E", 7, 7))
 
         print("Search (1.5,1.5,2.5,2.5):", t.search((1.5, 1.5, 2.5, 2.5)))
         print("Search (6,6,7,7):", t.search((6, 6, 7, 7)))
@@ -359,10 +385,12 @@ if __name__ == "__main__":
         recs = []
         for i in range(3):
             for j in range(3):
-                r = (i, j, i + 0.4, j + 0.4)
+                # store point at the cell center
+                cx = i + 0.2
+                cy = j + 0.2
                 name = f"p_{i}_{j}"
                 recs.append(name)
-                t.insert(r, name)
+                t.insert((name, cx, cy))
 
         print("Total before deletions:", len(t.search((-1, -1, 10, 10))))
         # delete some
@@ -373,14 +401,14 @@ if __name__ == "__main__":
     def root_restructure_test():
         print("\n=== Root restructure test ===")
         t = RTree(max_children=2)
-        t.insert((0, 0, 1, 1), "A")
-        t.insert((10, 10, 11, 11), "B")
-        t.insert((20, 20, 21, 21), "C")
+        t.insert(("A", 0.5, 0.5))
+        t.insert(("B", 10.5, 10.5))
+        t.insert(("C", 20.5, 20.5))
         print("Before deletions - total:", len(t.search((-1, -1, 30, 30))))
         t.delete("A")
         t.delete("B")
         print("After deletions - total:", len(t.search((-1, -1, 30, 30))))
-
     basic_test()
     underflow_test()
+    root_restructure_test()
     root_restructure_test()
