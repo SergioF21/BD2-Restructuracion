@@ -39,7 +39,7 @@ class FileManager:
                 f.write(struct.pack('i', self.free_list_head))
         except Exception as e:
             print(f"Error al escribir la cabecera: {e}")
-            
+
     def _get_byte_offset(self, pos: int) -> int:
         return pos * self.record_size
     
@@ -84,6 +84,11 @@ class FileManager:
             return None
 
     def _write_record_at_pos(self, record: Record, pos: int):
+        # Crear el archivo si no existe
+        if not os.path.exists(self.filename):
+            with open(self.filename, 'wb') as f:
+                pass  # Crear archivo vacío
+        
         with open(self.filename, 'r+b') as f:
             offset = self._get_byte_offset(pos)
             f.seek(offset)
@@ -103,3 +108,11 @@ class FileManager:
         self._write_header()
         
         return True
+    def get_all_records(self) -> List[Record]:
+        all_records = []
+        for idx in range(self.file_size):
+            record = self.read_record(idx)
+            # incluimos  solo los que existen y no estan eliminados
+            if record and record.next == 0: 
+                all_records.append(record)
+        return all_records
