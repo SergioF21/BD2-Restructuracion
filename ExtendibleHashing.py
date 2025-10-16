@@ -1,3 +1,7 @@
+import pickle
+import os
+from typing import Optional
+
 class Bucket:
     # d = profundidad local, fb = Factor de Bloque
     def __init__(self, d, fb): # El factor de bloque máximo es 3
@@ -5,16 +9,81 @@ class Bucket:
         self.fb = fb
         self.records = [] # (key, value)
         self.next = None
+        self.bucket_id = None  # ID único para persistencia
 
     def isfull(self):
         return len(self.records) >= self.fb
 
 
+class ExtendibleHashingPersistence:
+    """Maneja la persistencia del Extendible Hashing en memoria secundaria."""
+    
+    def __init__(self, index_filename: str):
+        self.index_filename = index_filename
+        self.bucket_counter = 0
+    
+    def _generate_bucket_id(self) -> int:
+        """Genera un ID único para cada bucket."""
+        self.bucket_counter += 1
+        return self.bucket_counter
+    
+    def _assign_bucket_ids(self, directory):
+        """Asigna IDs únicos a todos los buckets del directorio."""
+        seen_buckets = set()
+        
+        for bucket in directory:
+            if id(bucket) not in seen_buckets:
+                seen_buckets.add(id(bucket))
+                if bucket.bucket_id is None:
+                    bucket.bucket_id = self._generate_bucket_id()
+                
+                # Asignar ID al bucket encadenado si existe
+                if bucket.next and bucket.next.bucket_id is None:
+                    bucket.next.bucket_id = self._generate_bucket_id()
+    
+    def save_hash(self, eh: 'ExtendibleHashing'):
+        """Guarda el Extendible Hashing completo en un archivo."""
+        # Asignar IDs a todos los buckets
+        self._assign_bucket_ids(eh.directory)
+        
+        # Serializar la estructura
+        hash_data = {
+            'D': eh.D,
+            'bucketSize': eh.bucketSize,
+            'directory': eh.directory,
+            'bucket_counter': self.bucket_counter
+        }
+        
+        with open(self.index_filename, 'wb') as f:
+            pickle.dump(hash_data, f)
+    
+    def load_hash(self) -> Optional['ExtendibleHashing']:
+        """Carga el Extendible Hashing desde un archivo."""
+        if not os.path.exists(self.index_filename):
+            return None
+        
+        try:
+            with open(self.index_filename, 'rb') as f:
+                hash_data = pickle.load(f)
+            
+            eh = ExtendibleHashing(hash_data['bucketSize'])
+            eh.D = hash_data['D']
+            eh.directory = hash_data['directory']
+            self.bucket_counter = hash_data.get('bucket_counter', 0)
+            
+            return eh
+        except Exception as e:
+            print(f"Error al cargar el Extendible Hashing: {e}")
+            return None
+
+
 class ExtendibleHashing:
     # D = profundidad global, 
-    def __init__(self, bucketSize = 3):
+    def __init__(self, bucketSize = 3, index_filename: str = None):
         self.D = 2
         self.bucketSize = bucketSize
+        self.persistence = ExtendibleHashingPersistence(index_filename) if index_filename else None
+        self._auto_save = True  # Guardar automáticamente después de cada operación
 
         bucket0 = Bucket(d = 1, fb = bucketSize)
         bucket1 = Bucket(d = 1, fb = bucketSize)
@@ -23,6 +92,29 @@ class ExtendibleHashing:
         # [0,2] apuntan a bucket0, [1,3] apuntan a bucket1
         self.directory = [bucket0, bucket1, bucket0, bucket1] #punteros a los buckets
 
+
+    def load_from_file(self):
+        """Carga el Extendible Hashing desde el archivo de persistencia."""
+        if self.persistence:
+            loaded_hash = self.persistence.load_hash()
+            if loaded_hash:
+                self.D = loaded_hash.D
+                self.bucketSize = loaded_hash.bucketSize
+                self.directory = loaded_hash.directory
+                if loaded_hash.persistence:
+                    self.persistence.bucket_counter = loaded_hash.persistence.bucket_counter
+                return True
+        return False
+    
+    def save_to_file(self):
+        """Guarda el Extendible Hashing en el archivo de persistencia."""
+        if self.persistence:
+            self.persistence.save_hash(self)
+    
+    def _auto_save_if_enabled(self):
+        """Guarda automáticamente si está habilitado."""
+        if self._auto_save and self.persistence:
+            self.save_to_file()
 
     def EH_hash(self, key):
         return hash(key) % (2 ** self.D)
@@ -78,6 +170,8 @@ class ExtendibleHashing:
         # Caso 1: Espacio en el bucker principal
         if not bucket.isfull():
             bucket.records.append((key,value))
+            # Guardar automáticamente después de la inserción
+            self._auto_save_if_enabled()
             return
         
         #Caso 2: Bucket lleno
@@ -104,6 +198,9 @@ class ExtendibleHashing:
             else:
                 self.rehash()
                 self.insert(key,value)
+        
+        # Guardar automáticamente después de la inserción
+        self._auto_save_if_enabled()
     
     # Búsqueda
     def search(self, key):
@@ -150,6 +247,8 @@ class ExtendibleHashing:
         for i, (k, v) in enumerate(bucket.records):
             if k == key:
                 bucket.records.pop(i)
+                # Guardar automáticamente después de la eliminación
+                self._auto_save_if_enabled()
                 return f"{key} eliminado en el bucket principal"
 
         # Buscamos en el bucket con chaining
@@ -160,7 +259,11 @@ class ExtendibleHashing:
                     # Si el bucket queda vacío lo liberamos
                     if len(bucket.next.records) == 0:
                         bucket.next = None 
+                        # Guardar automáticamente después de la eliminación
+                        self._auto_save_if_enabled()
                         return f"{key} eliminado, liberando bucket encadenado"
+                    # Guardar automáticamente después de la eliminación
+                    self._auto_save_if_enabled()
                     return f"{key} eliminado en el bucket encadenado"
 
         return f"{key} no encontrado"
@@ -189,6 +292,8 @@ class ExtendibleHashing:
         for i, (k,v) in enumerate(bucket.records):
             if k == key:
                 bucket.records[i] = (k, pos)
+                # Guardar automáticamente después de la actualización
+                self._auto_save_if_enabled()
                 return f"{key} actualizado en el bucket principal"
 
         # Buscamos en el bucket con chaining
@@ -196,6 +301,8 @@ class ExtendibleHashing:
             for i, (k,v) in enumerate(bucket.next.records):
                 if k == key:
                     bucket.next.records[i] = (k, pos)
+                    # Guardar automáticamente después de la actualización
+                    self._auto_save_if_enabled()
                     return f"{key} actualizado en el bucket encadenado"
 
         return f"{key} no encontrado para actualizar"
