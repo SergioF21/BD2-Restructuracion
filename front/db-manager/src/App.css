@@ -1,0 +1,33 @@
+/* Reseteo básico */
+body, html, #root {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  width: 100vw;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  overflow: hidden; /* Evita scroll en la página principal */
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.content-body {
+  display: flex;
+  flex-grow: 1; /* Ocupa el resto del alto */
+  height: calc(100vh - 57px); /* Alto total menos el header */
+}
+
+/* Estilo para la manija de redimensión */
+.resize-handle {
+  width: 5px;
+  background-color: #f1f1f1;
+  cursor: col-resize;
+  transition: background-color 0.2s;
+}
+
+.resize-handle:hover {
+  background-color: #ddd;
+}
