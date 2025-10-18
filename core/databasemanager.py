@@ -110,4 +110,56 @@ class DatabaseManager:
         self.index.save_to_file()
         print("Datos guardados en memoria secundaria.")
  
-    
+    def get_index_info(self) -> dict:
+        """
+        Obtiene información sobre el estado del índice.
+        - Si el índice tiene traverse_leaves() (B+), se usa esa estructura.
+        - Si es ISAM, se infiere desde atributos idx_l3 y overflow.
+        """
+        # Preferir traverse_leaves si existe (BPlusTree)
+        if hasattr(self.index, 'traverse_leaves'):
+            try:
+                leaves = self.index.traverse_leaves()
+                total_keys = sum(len(keys) for keys, _ in leaves)
+                leaf_nodes = len(leaves)
+                order = getattr(self.index, 'order', None)
+                return {
+                    'total_keys': total_keys,
+                    'leaf_nodes': leaf_nodes,
+                    'order': order,
+                    'is_empty': self.index.is_empty()
+                }
+            except Exception:
+                pass
+
+        # Fallback para ISAMIndex (o índices sin traverse_leaves)
+        idx_l3 = getattr(self.index, 'idx_l3', None)
+        overflow = getattr(self.index, 'overflow', None)
+        order = getattr(self.index, 'order', None)
+
+        if idx_l3 is not None:
+            total_keys = len(idx_l3)
+            # contar posiciones extras en overflow como "keys" adicionales (si existen)
+            if isinstance(overflow, dict):
+                extra_positions = sum(len(v) for v in overflow.values())
+            else:
+                extra_positions = 0
+            # leaf_nodes: calcular páginas lógicas según order (si está)
+            if order and order > 0:
+                leaf_nodes = (len(idx_l3) + order - 1) // order
+            else:
+                leaf_nodes = len(idx_l3)
+            return {
+                'total_keys': total_keys + extra_positions,
+                'leaf_nodes': leaf_nodes,
+                'order': order,
+                'is_empty': self.index.is_empty()
+            }
+
+        # Último recurso: valores por defecto
+        return {
+            'total_keys': 0,
+            'leaf_nodes': 0,
+            'order': getattr(self.index, 'order', None),
+            'is_empty': self.index.is_empty()
+        }
