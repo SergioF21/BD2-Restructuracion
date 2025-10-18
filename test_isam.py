@@ -38,7 +38,7 @@ def run_once():
         db.add_record(rec)
 
     print("\n--- Después de insertar ---")
-
+    print("Info índice:", db.get_index_info())
     # Buscar clave con overflow (usamos la API isam si existe)
     if hasattr(db.index, 'get_all_positions'):
         print("\nPosiciones para clave 2:", db.index.get_all_positions(2))
@@ -82,3 +82,4 @@ if __name__ == "__main__":
         print("Posiciones para clave 2 (desde recarga):", db2.index.get_all_positions(2))
     else:
         print("Pos base para clave 2 (desde recarga):", db2.index.search(2))
+    print("Información del índice recargado:", db2.get_index_info())
