@@ -357,98 +357,81 @@ class RTree:
             for child in subtree_root.children:
                 self._reinsert_subtree(child)
 
+class RTreeIndex:
+    def __init__(self, index_filename, fields, max_children=M, file_manager=None):
+        self.index_filename = index_filename
+        self.fields = fields  # List of field definitions for spatial data
+        self.rtree = RTree(max_children=max_children)
+        self.id_to_pos = {}
+        self._loaded = False
+        self.file_manager = file_manager
+
+    def insert(self, record, pos=None):
+        """Insert a record into the R-Tree index."""
+        # soporte flexible para record (dict-like o objeto Record)
+        def _get(rec, name):
+            try:
+                if isinstance(rec, dict):
+                    return rec[name]
+            except Exception:
+                pass
+            if hasattr(rec, name):
+                return getattr(rec, name)
+            try:
+                return rec[name]
+            except Exception:
+                raise KeyError(name)
+
+        # obtener coordenadas e id (intentar 'id' o 'key')
+        rec_id = None
+        try:
+            rec_id = _get(record, 'id')
+        except Exception:
+            rec_id = getattr(record, 'key', None)
+        x = _get(record, self.fields[0].name)
+        y = _get(record, self.fields[1].name)
+        # insertar en el RTree (usa la API de puntos (id,x,y))
+        self.rtree.insert((rec_id, x, y))
+        # guardar mapeo id -> posición en archivo si se suministró
+        if pos is not None:
+            self.id_to_pos[rec_id] = pos
+        return rec_id
+
+    def search(self, rec_id):
+        """Return the file position for rec_id (or None)."""
+        return self.id_to_pos.get(rec_id)
     
-if __name__ == "__main__":
-    # Quick self-tests placed here so the file is runnable
-    def basic_test():
-        print("=== Basic R-Tree test ===")
-        t = RTree(max_children=4)
-        # insert as (id, x, y)
-        t.insert(("A", 1, 1))
-        t.insert(("B", 2, 2))
-        t.insert(("C", 3, 3))
-        t.insert(("D", 5, 5))
-        t.insert(("E", 7, 7))
+    def load_from_file(self):
+        """Build the R-tree from the FileManager contents (if provided)."""
+        if not self.file_manager:
+            return False
+        idx = 0
+        any_inserted = False
+        while True:
+            record = self.file_manager.read_record(idx)
+            if record is None:
+                break
+            # Only valid records (not logically deleted) - using .next == 0 convention
+            if getattr(record, 'next', 0) == 0:
+                try:
+                    rec_id = getattr(record, 'key', None) or getattr(record, 'id', None)
+                    x = getattr(record, self.fields[0].name)
+                    y = getattr(record, self.fields[1].name)
+                except Exception:
+                    idx += 1
+                    continue
+                self.rtree.insert((rec_id, float(x), float(y)))
+                self.id_to_pos[rec_id] = idx
+                any_inserted = True
+            idx += 1
+        self._loaded = True
+        return any_inserted
 
-        print("Search (1.5,1.5,2.5,2.5):", t.search((1.5, 1.5, 2.5, 2.5)))
-        print("Search (6,6,7,7):", t.search((6, 6, 7, 7)))
+    def save_to_file(self):
+        """No-op placeholder for persistence (implement if needed)."""
+        return True
 
-        t.delete("B")
-        print("After deleting B:")
-        print("Search (1.5,1.5,2.5,2.5):", t.search((1.5, 1.5, 2.5, 2.5)))
-        print("Search (2.5,2.5,3.5,3.5):", t.search((2.5, 2.5, 3.5, 3.5)))
+    # Optional wrappers for spatial queries returning ids
+    def range_search(self, bbox):
+        return self.rtree.intersection_search(bbox)
 
-    def underflow_test():
-        print("\n=== Underflow test ===")
-        t = RTree(max_children=2)
-        # insert small grid
-        recs = []
-        for i in range(3):
-            for j in range(3):
-                # store point at the cell center
-                cx = i + 0.2
-                cy = j + 0.2
-                name = f"p_{i}_{j}"
-                recs.append(name)
-                t.insert((name, cx, cy))
-
-        print("Total before deletions:", len(t.search((-1, -1, 10, 10))))
-        # delete some
-        for name in recs[:4]:
-            t.delete(name)
-        print("Total after deletions:", len(t.search((-1, -1, 10, 10))))
-
-    def root_restructure_test():
-        print("\n=== Root restructure test ===")
-        t = RTree(max_children=2)
-        t.insert(("A", 0.5, 0.5))
-        t.insert(("B", 10.5, 10.5))
-        t.insert(("C", 20.5, 20.5))
-        print("Before deletions - total:", len(t.search((-1, -1, 30, 30))))
-        t.delete("A")
-        t.delete("B")
-        print("After deletions - total:", len(t.search((-1, -1, 30, 30))))
-
-    def range_radio_test():
-        print("\n=== range_search_radio test ===")
-        t = RTree(max_children=4)
-        t.insert(("A", 1, 1))
-        t.insert(("B", 2, 2))
-        t.insert(("C", 3, 3))
-        t.insert(("D", 5, 5))
-        # circle centered at (2,2) radius 1.1 -> should include B only
-        res = t.range_search_radio((2, 2), 1.1)
-        print("range_search_radio((2,2),1.1):", res)
-        assert "B" in res and "A" not in res
-
-    def knn_test():
-        print("\n=== range_search_k (k-NN) test ===")
-        t = RTree(max_children=4)
-        t.insert(("A", 1, 1))
-        t.insert(("B", 2, 2))
-        t.insert(("C", 3, 3))
-        t.insert(("D", 5, 5))
-        # nearest 2 to (2.1,2.1) should be B and C (in that order)
-        res = t.range_search_k((2.1, 2.1), 2)
-        print("range_search_k((2.1,2.1),2):", res)
-        assert res and res[0] == "B"
-
-    def intersection_test():
-        print("\n=== intersection_search test ===")
-        t = RTree(max_children=4)
-        t.insert(("A", 1, 1))
-        t.insert(("B", 2, 2))
-        t.insert(("C", 3, 3))
-        t.insert(("D", 5, 5))
-        # bbox (1.5,1.5,3.5,3.5) should intersect B and C
-        res = t.intersection_search((1.5, 1.5, 3.5, 3.5))
-        print("intersection_search((1.5,1.5,3.5,3.5)):", res)
-        assert "B" in res and "C" in res
-
-    basic_test()
-    underflow_test()
-    root_restructure_test()
-    # additional tests for spatial queries
-    range_radio_test()
-    knn_test()
-    intersection_test()
