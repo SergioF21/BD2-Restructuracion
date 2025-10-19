@@ -4,6 +4,8 @@ from core.file_manager import FileManager
 from indexes.bplus import BPlusTree
 from indexes.isam import ISAMIndex
 from indexes.sequential_file import SequentialIndex  # NUEVO IMPORT
+from indexes.rtree import RTreeIndex
+
 from typing import List, Union, Any
 
 
@@ -20,7 +22,7 @@ class DatabaseManager:
         self.index_filename = filename.replace('.dat', '.idx')
 
         # ¡IMPORTANTE! El FileManager solo se usa para B+ e ISAM
-        if self.index_type in ('bplus', 'isam'):
+        if self.index_type in ('bplus', 'isam', 'rtree'):
             self.file_manager = FileManager(self.data_filename, table)
         else:
             self.file_manager = None  # No usamos FileManager para Sequential
@@ -30,6 +32,13 @@ class DatabaseManager:
             self.index = ISAMIndex(self.data_filename, index_filename=self.index_filename, file_manager=self.file_manager)
         elif index_type == 'sequential':  # ¡NUEVO CASO!
             self.index = SequentialIndex(self.data_filename, self.table)
+        elif index_type == 'rtree':
+            # Suponiendo que la tabla tiene campos adecuados para R-Tree
+            spatial_fields = [field for field in table.fields if field.field_type in ('float', 'int')]
+            if len(spatial_fields) < 2:
+                raise ValueError("R-Tree requires at least two spatial fields (int or float).")
+            self.index = RTreeIndex(self.index_filename, spatial_fields, file_manager=self.file_manager)
+            
         else:
             # Comportamiento por defecto: B+ Tree con persistencia
             self.index = BPlusTree(order=order, index_filename=self.index_filename)
@@ -71,6 +80,11 @@ class DatabaseManager:
             # SequentialIndex maneja su propia escritura de archivos
             # Le pasamos el objeto Record COMPLETO
             self.index.insert(record.key, record)
+        elif self.index_type == 'rtree':
+            # Para R-Tree, escribir al archivo de datos y pasar el Record completo y la posición
+            pos = self.file_manager.add_record(record)
+            # RTreeIndex.insert acepta (record, pos)
+            self.index.insert(record, pos)
         else:
             # Lógica anterior para B+ e ISAM
             pos = self.file_manager.add_record(record)
@@ -84,6 +98,11 @@ class DatabaseManager:
         if self.index_type == 'sequential':
             # SequentialIndex.search() devuelve el Record completo
             return self.index.search(key)
+        elif self.index_type == 'rtree':
+            pos = self.index.search(key)
+            if pos is not None:
+                return self.file_manager.read_record(pos)
+            return None
         else:
             # Lógica anterior
             pos = self.index.search(key)
