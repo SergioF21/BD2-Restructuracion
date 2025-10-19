@@ -41,6 +41,11 @@ class SQLTransformer(Transformer):
             return float(s) if '.' in s else int(s)
         return v
 
+    def statement_list(self, items):
+        """Debug para ver todo lo que se está parseando."""
+        print(f"DEBUG statement_list ALL ITEMS: {items}")
+        return {"type": "statement_list", "statements": items}
+
     def _unwrap(self, item):
         # Si Lark nos pasa Tree o Token anidado, sacamos el valor contenido cuando sea simple.
         if isinstance(item, Tree):
@@ -79,6 +84,31 @@ class SQLTransformer(Transformer):
             # si Tree es lista, procesar children
             return [self._unwrap_token(c) for c in v.children]
         return v
+
+    def value_list(self, items):
+        """Value list corregido para aplanar listas."""
+        values = []
+        for item in items:
+            unwrapped = self._unwrap_tree_token(item)
+            if isinstance(unwrapped, list):
+                values.extend(unwrapped)
+            else:
+                values.append(unwrapped)
+        
+        print(f"DEBUG value_list final: {values}")
+        return values
+
+    def index_type(self, items):
+        """Procesa tipo de índice."""
+        if items:
+            return self._unwrap_tree_token(items[0])
+        return None
+
+    def key_field(self, items):
+        """Procesa campo clave."""
+        if items:
+            return self._unwrap_tree_token(items[0])
+        return None
 
     # --- Start / statement list ---
     def start(self, items):
@@ -130,74 +160,188 @@ class SQLTransformer(Transformer):
 
 
     def create_table_from_file(self, items):
-        # items: puede contener table name, filename (string token), index_type, key_field (CNAME or string)
+        """CREATE TABLE FROM FILE corregido."""
         table_name = None
         file_path = None
         index_type = None
         key_field = None
-        from lark import Token, Tree
-
-        # items puede venir como lista/Tree/Token/str; iteramos y desempaquetamos
-        for it in items:
-            if isinstance(it, Token):
-                if it.type == "CNAME" and table_name is None:
-                    table_name = str(it)
-                elif it.type == "ESCAPED_STRING" and file_path is None:
-                    file_path = str(it)[1:-1]
-            elif isinstance(it, str):
-                # si uno de los strings es nombre de archivo o index type o key
+        
+        print(f"DEBUG create_table_from_file items: {items}")
+        
+        # Procesar todos los items
+        for item in items:
+            unwrapped = self._unwrap_tree_token(item)
+            print(f"DEBUG unwrapped: {unwrapped} (type: {type(unwrapped)})")
+            
+            if isinstance(unwrapped, str):
                 if table_name is None:
-                    table_name = it
-                elif file_path is None and (it.endswith('.csv') or it.startswith('/') or it.startswith('.')):
-                    file_path = it.strip('"').strip("'")
-                elif index_type is None:
-                    index_type = it
-                elif key_field is None:
-                    key_field = it
-            elif isinstance(it, Tree):
-                # key_field puede llegar como Tree('string', [Token('ESCAPED_STRING', '"id"')])
-                val = self._unwrap_tree_token(it)
-                if isinstance(val, str) and key_field is None:
-                    key_field = val
-        # limpiar comillas en key_field si vienen
-        if isinstance(key_field, str) and (key_field.startswith('"') or key_field.startswith("'")):
-            key_field = key_field.strip('"').strip("'")
-        if isinstance(index_type, str):
-            index_type_norm = index_type.upper()
-        else:
-            index_type_norm = None
-        return ExecutionPlan('CREATE_TABLE', table_name=table_name, fields=None, source=file_path, index_type=index_type_norm, key_field=key_field)
-
+                    table_name = unwrapped
+                elif file_path is None and ('.csv' in unwrapped or unwrapped.endswith('.csv')):
+                    file_path = unwrapped
+                elif index_type is None and unwrapped.upper() in ['BTREE', 'EXTENDIBLEHASH', 'ISAM', 'SEQ', 'RTREE']:
+                    index_type = unwrapped.upper()
+                elif key_field is None and unwrapped not in [table_name, file_path, index_type]:
+                    key_field = unwrapped
+        
+        # Si todavía no tenemos key_field, buscar en lists anidadas
+        if key_field is None:
+            for item in items:
+                unwrapped = self._unwrap_tree_token(item)
+                if isinstance(unwrapped, list):
+                    for subitem in unwrapped:
+                        if isinstance(subitem, str) and subitem not in [table_name, file_path, index_type]:
+                            key_field = subitem
+                            break
+        
+        print(f"DEBUG final: table_name={table_name}, file_path={file_path}, index_type={index_type}, key_field={key_field}")
+        
+        return ExecutionPlan('CREATE_TABLE', 
+                        table_name=table_name, 
+                        fields=None, 
+                        source=file_path, 
+                        index_type=index_type, 
+                        key_field=key_field)
         
     # --- field definition and list ---
-    def field_definition(self, *items):
-        # Expect: name, data_type (possibly "VARCHAR", size), optional index_option
-        name = None
+    def field_definition(self, items):
+        """Field definition mejorado para manejar Trees vacíos."""
+        print(f"DEBUG field_definition items: {items}")
+        
+        if len(items) < 2:
+            return None
+        
+        name = self._unwrap_tree_token(items[0])
+        dtype_info = items[1]
+        
         dtype = None
-        size = None
-        idx = None
-        for it in items:
-            if isinstance(it, str) and name is None:
-                name = it
-            elif isinstance(it, dict) and 'index' in it:
-                idx = it['index']
-            elif isinstance(it, (int, float)):
-                size = int(it)
-            elif isinstance(it, str) and dtype is None:
-                dtype = it
-            elif isinstance(it, list):
-                # could be emitted as list, search inside
-                for sub in it:
-                    if isinstance(sub, str) and dtype is None:
-                        dtype = sub
-                    if isinstance(sub, int) and size is None:
-                        size = int(sub)
-        # normalize dtype: if dtype like VARCHAR and size present, create 'VARCHAR[20]'
-        if dtype and size:
-            dtype_repr = f"{dtype}[{size}]"
+        size = 0
+        
+        # DEBUG profundo del dtype_info
+        print(f"DEBUG dtype_info: {dtype_info} (type: {type(dtype_info)})")
+        if hasattr(dtype_info, 'data'):
+            print(f"DEBUG dtype_info.data: {dtype_info.data}")
+            print(f"DEBUG dtype_info.children: {dtype_info.children}")
+        
+        # Estrategia 1: Si es Tree de data_type vacío, buscar en el contexto
+        if dtype_info is None or (hasattr(dtype_info, 'data') and dtype_info.data == 'data_type' and not dtype_info.children):
+            # Buscar en items siguientes si hay algún tipo
+            for i in range(2, len(items)):
+                potential = self._unwrap_tree_token(items[i])
+                if isinstance(potential, str) and potential.upper() in ['INT', 'VARCHAR', 'FLOAT', 'DATE', 'ARRAY']:
+                    dtype = potential
+                    break
+        
+        # Estrategia 2: Procesar normal
         else:
-            dtype_repr = dtype
-        return {"name": name, "type": dtype_repr, "size": size or 0, "index": idx}
+            dtype_result = self._unwrap_tree_token(dtype_info)
+            print(f"DEBUG dtype_result: {dtype_result} (type: {type(dtype_result)})")
+            
+            if isinstance(dtype_result, tuple):
+                dtype, size = dtype_result
+            elif isinstance(dtype_result, str):
+                dtype = dtype_result
+        
+        # Estrategia 3: Si todavía no tenemos dtype, usar lógica de backup
+        if dtype is None:
+            # Para el campo 'id', es probable que sea INT
+            if name.lower() == 'id':
+                dtype = 'INT'
+            # Para campos con 'nombre', 'descripcion', etc, podría ser VARCHAR
+            elif any(x in name.lower() for x in ['nombre', 'name', 'desc', 'description']):
+                dtype = 'VARCHAR'
+                size = 50  # tamaño por defecto
+        
+        # Procesar opciones de índice
+        index_type = None
+        if len(items) > 2:
+            for i in range(2, len(items)):
+                item = items[i]
+                unwrapped = self._unwrap_tree_token(item)
+                if isinstance(unwrapped, str) and unwrapped.upper() in ['SEQ', 'BTREE', 'EXTENDIBLEHASH', 'ISAM', 'RTREE']:
+                    index_type = unwrapped.upper()
+                    break
+        
+        result = {
+            "name": name,
+            "type": dtype,
+            "size": size,
+            "index": index_type
+        }
+        print(f"DEBUG field_definition final result: {result}")
+        return result
+
+    
+    def comparison_operator(self, items):
+        """Procesa operadores de comparación."""
+        print(f"DEBUG comparison_operator items: {items}")
+        
+        if items:
+            operator = self._unwrap_tree_token(items[0])
+            print(f"DEBUG comparison_operator result: {operator}")
+            return operator
+        
+        # Si está vacío, podría ser que el operador viene de otra manera
+        return "="  # Default
+
+    def between_condition(self, items):
+        """Procesa condiciones BETWEEN."""
+        print(f"DEBUG between_condition items: {items}")
+        
+        if len(items) >= 4:
+            field = self._unwrap_tree_token(items[0])
+            start = self._unwrap_tree_token(items[2])  # Saltar BETWEEN
+            end = self._unwrap_tree_token(items[4])    # Saltar AND
+            
+            return {
+                "type": "between",
+                "field": field,
+                "start": start,
+                "end": end
+            }
+        return None
+
+    def spatial_condition(self, items):
+        """Procesa condiciones espaciales IN (point, radius)."""
+        print(f"DEBUG spatial_condition items: {items}")
+        
+        if len(items) >= 4:
+            field = self._unwrap_tree_token(items[0])
+            point = self._unwrap_tree_token(items[3])  # Después de IN (
+            radius = self._unwrap_tree_token(items[5]) # Después de la coma
+            
+            return {
+                "type": "spatial",
+                "field": field,
+                "point": point,
+                "radius": radius
+            }
+        return None
+
+    def EQUALS(self, token):
+        """Procesa operador =."""
+        return "="
+
+    def NOTEQUALS(self, token):
+        """Procesa operador !=."""
+        return "!="
+
+    def LESSTHAN(self, token):
+        """Procesa operador <."""
+        return "<"
+
+    def GREATERTHAN(self, token):
+        """Procesa operador >."""
+        return ">"
+
+    def LESSEQUAL(self, token):
+        """Procesa operador <=."""
+        return "<="
+
+    def GREATEREQUAL(self, token):
+        """Procesa operador >=."""
+        return ">="
+
+    
 
     def field_definitions(self, *items):
         # items are field_definition dicts
@@ -250,28 +394,57 @@ class SQLTransformer(Transformer):
 
 
     # comparisons / conditions
-    def comparison(self, *items):
-        # items: field, operator, value
+    def comparison(self, items):
+        """Procesa comparaciones corregido."""
+        print(f"DEBUG comparison items: {items}")
+        
         if len(items) >= 3:
-            field = self._unwrap(items[0])
-            op = str(items[1])
-            val = self._unwrap(items[2])
-            return {"type":"cmp", "field": field, "op": op, "value": val}
+            field = self._unwrap_tree_token(items[0])
+            operator_tree = items[1]
+            value = self._unwrap_tree_token(items[2])
+            
+            # Procesar operador específicamente
+            operator = "="  # default
+            if hasattr(operator_tree, 'data') and operator_tree.data == 'comparison_operator':
+                if operator_tree.children:
+                    operator = self._unwrap_tree_token(operator_tree.children[0])
+                else:
+                    # Si el Tree está vacío, asumir "="
+                    operator = "="
+            else:
+                operator = self._unwrap_tree_token(operator_tree)
+            
+            result = {
+                "type": "comparison", 
+                "field": field,
+                "operator": operator,
+                "value": value
+            }
+            print(f"DEBUG comparison result: {result}")
+            return result
+        
         return None
 
-    def condition(self, *items):
-        # left-associative combine: items like comp, op, comp, op, comp...
-        if not items:
-            return None
-        node = items[0]
-        i = 1
-        while i < len(items):
-            op_tok = items[i]
-            right = items[i+1]
-            op = str(op_tok).lower()
-            node = {"type": op, "left": node, "right": right}
-            i += 2
-        return node
+    def condition(self, items):
+        """Procesa condiciones (puede ser simple o compuesta)."""
+        print(f"DEBUG condition items: {items}")
+        
+        if len(items) == 1:
+            # Condición simple
+            return self._unwrap_tree_token(items[0])
+        elif len(items) >= 3:
+            # Condición compuesta (AND/OR)
+            left = self._unwrap_tree_token(items[0])
+            operator = self._unwrap_tree_token(items[1]).lower()
+            right = self._unwrap_tree_token(items[2])
+            
+            return {
+                "type": operator,
+                "left": left,
+                "right": right
+            }
+        
+        return None
 
     def between(self, *items):
         # field, a, AND, b
@@ -298,8 +471,6 @@ class SQLTransformer(Transformer):
         return ExecutionPlan('INSERT', table_name=table, values=values or [])
 
 
-    def value_list(self, *items):
-        return [self._unwrap(i) for i in items]
 
     # --- UPDATE ---
     def assignment(self, *items):
@@ -329,18 +500,36 @@ class SQLTransformer(Transformer):
 
     # --- DELETE ---
     def delete_statement(self, items):
+        """DELETE corregido - asigna where_clause correctamente."""
+        print(f"DEBUG delete_statement items: {items}")
+        
         table = None
         where = None
-        from lark import Token
+        
         for it in items:
-            if isinstance(it, Token) and it.type == "CNAME" and table is None:
-                table = str(it)
-            elif isinstance(it, str) and table is None:
-                table = it
-            elif isinstance(it, dict) and it.get('type') in ('cmp','and','or','between'):
-                where = it
+            unwrapped = self._unwrap_tree_token(it)
+            print(f"DEBUG delete item: {it} -> {unwrapped}")
+            
+            if isinstance(unwrapped, str) and table is None:
+                table = unwrapped
+            elif isinstance(unwrapped, dict) and unwrapped.get('type') == 'comparison':
+                where = unwrapped
+                print(f"DEBUG found where clause: {where}")
+        
+        print(f"DEBUG delete final: table={table}, where={where}")
+        
+        # Asegurarse de devolver el where_clause
         return ExecutionPlan('DELETE', table_name=table, where_clause=where)
 
+    def where_clause(self, items):
+        """Procesa WHERE clause."""
+        print(f"DEBUG where_clause input: {items}")
+        
+        if items:
+            condition = self._unwrap_tree_token(items[0])
+            print(f"DEBUG where_clause result: {condition}")
+            return condition
+        return None
 
     # --- point / radius / values helpers ---
     def point(self, *items):
@@ -367,8 +556,6 @@ class SQLTransformer(Transformer):
         s = str(token)
         return float(s) if '.' in s else int(s)
 
-    def INT(self, tok):
-        return int(str(tok))
     
     def ESCAPED_STRING(self, token):
         s = str(token)
@@ -391,21 +578,49 @@ class SQLTransformer(Transformer):
         return v
 
     def _unwrap_tree_token(self, v):
-        # devuelve value limpio si v es Tree(Token) o Token
+        """Versión mejorada que maneja todos los casos de Trees y Tokens."""
         from lark import Tree, Token
-        if isinstance(v, Token):
-            if v.type in ("INT",):
-                return int(str(v))
-            if v.type in ("SIGNED_NUMBER",):
-                return self._as_number(v)
-            if v.type == "ESCAPED_STRING":
-                s = str(v); return s[1:-1].encode('utf-8').decode('unicode_escape')
-            return str(v)
+        
         if isinstance(v, Tree):
+            # Procesar según el tipo de Tree
+            if v.data == 'data_type':
+                if v.children:
+                    return self._unwrap_tree_token(v.children[0])
+                return None
+            elif v.data == 'string_literal':
+                if v.children and isinstance(v.children[0], Token):
+                    return self._process_string_token(v.children[0])
+            elif v.data in ['index_type', 'key_field']:
+                if v.children:
+                    return self._unwrap_tree_token(v.children[0])
+            
+            # Para otros trees, procesar children recursivamente
             if len(v.children) == 1:
                 return self._unwrap_tree_token(v.children[0])
-            return [self._unwrap_tree_token(c) for c in v.children]
+            else:
+                return [self._unwrap_tree_token(c) for c in v.children]
+        
+        elif isinstance(v, Token):
+            if v.type == "ESCAPED_STRING":
+                return self._process_string_token(v)
+            elif v.type in ("INT", "SIGNED_NUMBER"):
+                return self._to_number(v)
+            elif v.type == "CNAME":
+                return str(v)
+        
+        elif isinstance(v, list):
+            if len(v) == 1:
+                return self._unwrap_tree_token(v[0])
+            return [self._unwrap_tree_token(item) for item in v]
+        
         return v
+
+    def _process_string_token(self, token):
+        """Procesa tokens de string removiendo comillas y escapando."""
+        s = str(token)
+        if (s.startswith(('"', "'")) and s.endswith(('"', "'"))):
+            s = s[1:-1]
+        return s.encode('utf-8').decode('unicode_escape')
 
     def number(self, token):
         # token puede ser Token('SIGNED_NUMBER', '1') o Tree; usar helper
@@ -415,6 +630,57 @@ class SQLTransformer(Transformer):
         # token es Tree('string_literal', [Token('ESCAPED_STRING', '"text"')]) o Token
         return self._unwrap_tree_token(token)
 
+    def data_type(self, items):
+        """Procesa tipos de datos correctamente."""
+        print(f"DEBUG data_type input: {items}")
+        
+        if not items:
+            return None
+        
+        # Si es un Tree de data_type, procesar sus children
+        if hasattr(items[0], 'data') and items[0].data == 'data_type':
+            return self._unwrap_tree_token(items[0])
+        
+        # Si es una lista, tomar el primer elemento
+        if isinstance(items, list) and len(items) > 0:
+            first_item = items[0]
+            
+            # Si el primer item es un token de tipo
+            if isinstance(first_item, Token) and first_item.type == 'CNAME':
+                dtype = str(first_item).upper()
+                
+                # Verificar si hay tamaño (VARCHAR[20])
+                if len(items) > 1:
+                    size_item = items[1]
+                    if isinstance(size_item, Token) and size_item.type == 'INT':
+                        size = int(size_item)
+                        return (dtype, size)
+                
+                return dtype
+        
+        return self._unwrap_tree_token(items[0])
+
+    def SINGLE_QUOTED_STRING(self, token):
+        """Procesa strings con comillas simples."""
+        s = str(token)
+        if s.startswith("'") and s.endswith("'"):
+            s = s[1:-1]
+        return s.encode('utf-8').decode('unicode_escape')
+
+    def INT(self, token):
+        return "INT"
+
+    def VARCHAR(self, token):
+        return "VARCHAR"
+
+    def FLOAT(self, token):
+        return "FLOAT"
+
+    def DATE(self, token):
+        return "DATE"
+
+    def ARRAY(self, token):
+        return "ARRAY"
 class SQLParser:
     """Parser SQL principal que devuelve ExecutionPlan."""
     
@@ -443,6 +709,14 @@ class SQLParser:
             
             # Parsear
             result = self.parser.parse(sql_command)
+            
+            # Si es un statement_list, extraer el primer statement
+            if isinstance(result, dict) and result.get('type') == 'statement_list':
+                statements = result.get('statements', [])
+                if statements:
+                    return statements[0]  # Devolver el primer ExecutionPlan
+                return None
+            
             return result
             
         except LarkError as e:

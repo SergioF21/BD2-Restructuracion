@@ -81,7 +81,7 @@ radius: SIGNED_NUMBER
 table_name: CNAME
 field_name: CNAME
 
-string_literal: ESCAPED_STRING
+string_literal: ESCAPED_STRING | SINGLE_QUOTED_STRING
 
 // Tokens: rely on common tokens from lark
 %import common.CNAME
@@ -96,4 +96,7 @@ string_literal: ESCAPED_STRING
 %import common.CPP_COMMENT
 %ignore C_COMMENT
 %ignore CPP_COMMENT
+
+// Agregar soporte para comillas simples
+SINGLE_QUOTED_STRING: /'[^']*'/
 """
