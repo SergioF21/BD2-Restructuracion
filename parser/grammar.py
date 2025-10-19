@@ -28,13 +28,14 @@ index_options: "KEY"i "INDEX"i index_type
 
 // DATA TYPES
 data_type: "INT"i
-         | "INTEGER"i
+         | "INTEGER"i  
          | "FLOAT"i
          | "DOUBLE"i
          | "DATE"i
-         | "VARCHAR"i "[" INT "]"
-         | "STRING"i "[" INT "]"
-         | "ARRAY"i "[" "FLOAT"i "]"
+         | "VARCHAR"i "[" INT "]"   // VARCHAR[50] - SIN regla especial
+         | "STRING"i "[" INT "]"    // STRING[50] - SIN regla especial  
+         | "ARRAY"i "[" "FLOAT"i "]" // ARRAY[FLOAT] - SIN regla especial
+
 
 // INDEX TYPES (aceptamos variantes en transformer)
 //index_type: CNAME
