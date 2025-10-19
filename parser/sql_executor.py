@@ -12,12 +12,13 @@ from sql_parser import ExecutionPlan
 # Agregar el directorio padre al path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from bplus import BPlusTree
-from ExtendibleHashing import ExtendibleHashing
-from isam import ISAMIndex
+from indexes.bplus import BPlusTree
+from indexes.ExtendibleHashing import ExtendibleHashing
+from indexes.isam import ISAMIndex
 from core.databasemanager import DatabaseManager
 from core.models import Table, Field, Record
-from rtree import RTree
+from indexes.rtree import RTree
+from indexes.isam import ISAMIndex
 
 class SQLExecutor:
     """Executor que ejecuta ExecutionPlan sobre las estructuras de datos."""
@@ -69,7 +70,6 @@ class SQLExecutor:
             return {'success': False, 'error': f'Error ejecutando operación: {str(e)}'}
     
     def _execute_delete(self, plan: ExecutionPlan) -> Dict[str, Any]:
-        """Ejecuta DELETE - VERSIÓN FINAL FUNCIONAL."""
         table_name = plan.data['table_name']
         where_clause = plan.data.get('where_clause')
         
@@ -79,8 +79,10 @@ class SQLExecutor:
         try:
             structure = self.structures[table_name]
             
+            print(f"DEBUG Estructura real: {type(structure)}")
+            
             if not where_clause:
-                return {'success': False, 'error': 'DELETE sin WHERE no implementado por seguridad'}
+                return {'success': False, 'error': 'DELETE sin WHERE no implementado'}
             
             if where_clause.get('type') == 'comparison':
                 field = where_clause['field']
@@ -88,17 +90,22 @@ class SQLExecutor:
                 operator = where_clause['operator']
                 
                 if operator == '=':
-                    # SIMULAR SIEMPRE ÉXITO PARA TESTING
-                    # En una implementación real aquí iría la lógica real de eliminación
-                    return {
-                        'success': True,
-                        'message': f'Registro eliminado de "{table_name}" (simulado)'
-                    }
-                else:
-                    return {'success': False, 'error': f'Operador {operator} no soportado en DELETE'}
-            else:
-                return {'success': False, 'error': 'Tipo de condición WHERE no soportado en DELETE'}
-                
+                    # Buscar primero para verificar existencia
+                    existing = structure.search(value)
+                    print(f"DEBUG Búsqueda previa: {existing}")
+                    
+                    if existing:
+                        result = structure.delete(value)
+                        print(f"DEBUG Resultado delete: {result}")
+                        return {
+                            'success': True,
+                            'message': f'Registro con clave {value} eliminado de "{table_name}"'
+                        }
+                    else:
+                        return {'success': False, 'error': f'Clave {value} no encontrada'}
+            
+            return {'success': False, 'error': 'Tipo de condición no soportado'}
+            
         except Exception as e:
             return {'success': False, 'error': f'Error eliminando registro: {str(e)}'}
     
@@ -108,7 +115,7 @@ class SQLExecutor:
         index_type = plan.data['index_type'].upper()
         key_field = plan.data['key_field']
         
-        print(f"🔧 DEBUG _create_table_from_file: {table_name}, {file_path}, {index_type}, {key_field}")
+        print(f"DEBUG _create_table_from_file: {table_name}, {file_path}, {index_type}, {key_field}")
         
         # Verificar que el archivo existe
         if not os.path.exists(file_path):
@@ -154,7 +161,7 @@ class SQLExecutor:
                 'source_file': file_path
             }
             
-            # Inicializar estructura de datos mock
+            # ¡¡¡FALTABAN ESTAS 2 LÍNEAS CRÍTICAS!!!
             structure = self._create_structure(table_name, index_type, fields, key_field)
             self.structures[table_name] = structure
             
@@ -225,9 +232,6 @@ class SQLExecutor:
                 'source': None
             }
             
-            # Inicializar estructura de datos mock
-            structure = self._create_structure(table_name, index_type, fields, key_field)
-            self.structures[table_name] = structure
             
             return {
                 'success': True,
@@ -239,63 +243,66 @@ class SQLExecutor:
         except Exception as e:
             return {'success': False, 'error': f'Error creando tabla desde esquema: {e}'}
     
-    def _create_structure(self, table_name: str, index_type: str, table: Table):
-        """Crea la estructura de datos apropiada."""
+    def _create_structure(self, table_name: str, index_type: str, fields: List, key_field: str):
         index_type = index_type.upper()
         
-        if index_type in ['SEQ', 'SEQUENTIAL']:
-            return DatabaseManager(table, f"{table_name}.dat", order=3)
-        elif index_type in ['BTREE', 'BTREE']:
-            return BPlusTree(order=4, index_filename=f"{table_name}_btree.idx")
-        elif index_type == 'ISAM':
-            return ISAMIndex(f"{table_name}_isam.dat")
-        elif index_type in ['EXTENDIBLEHASH', 'EXTENDIBLEHASH']:
-            return ExtendibleHashing(bucketSize=3, index_filename=f"{table_name}_hash.idx")
-        elif index_type in ['RTREE', 'RTREE']:
-            return RTree()
-        else:
-            raise ValueError(f'Tipo de índice no soportado: {index_type}')
+        print(f"DEBUG Creando estructura REAL para {table_name} con índice {index_type}")
+        
+        try:
+            if index_type == 'BTREE':
+                structure = BPlusTree(order=4, index_filename=f"data/{table_name}_btree.idx")
+                print(f"DEBUG B+ Tree creado: {type(structure)}")
+                
+            elif index_type == 'ISAM':
+                structure = ISAMIndex(f"data/{table_name}_isam.dat")
+                print(f"DEBUG ISAM creado: {type(structure)}")
+                
+            elif index_type == 'EXTENDIBLEHASH':
+                structure = ExtendibleHashing(bucketSize=3, index_filename=f"data/{table_name}_hash.idx")
+                print(f"DEBUG Extendible Hashing creado: {type(structure)}")
+                
+            else:
+                raise ValueError(f'Tipo de índice no soportado: {index_type}')
+            
+            # Cargar datos existentes si hay
+            if hasattr(structure, 'load_from_file'):
+                loaded = structure.load_from_file()
+                print(f"DEBUG Carga desde archivo: {loaded}")
+            
+            print(f"DEBUG Estructura REAL final: {type(structure)}")
+            return structure
+            
+        except Exception as e:
+            print(f"ERROR creando estructura real: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
     
-    def _load_data_from_csv(self, table_name: str, file_path: str, fields: List, structure, index_type: str, key_field: str):
-        """Carga datos desde CSV - VERSIÓN CORREGIDA."""
+    def _load_data_from_csv(self, table_name, file_path, fields, structure, index_type, key_field):
+        """Carga datos reales desde CSV a estructuras reales"""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 record_count = 0
                 
-                for row_num, row in enumerate(reader):
-                    if row_num == 0:  # Saltar encabezados
-                        continue
-                    
+                for row in reader:
                     values = []
                     for field in fields:
-                        col_name = field['name']
-                        value = row.get(col_name, '')
+                        value = row.get(field['name'], '')
                         
-                        # Convertir según el tipo
                         if field['type'] == 'INT':
-                            try:
-                                values.append(int(value) if value.strip() else 0)
-                            except:
-                                values.append(0)
+                            values.append(int(value) if value.strip() else 0)
                         elif field['type'] == 'FLOAT':
-                            try:
-                                values.append(float(value) if value.strip() else 0.0)
-                            except:
-                                values.append(0.0)
+                            values.append(float(value) if value.strip() else 0.0)
                         else:  # VARCHAR
                             values.append(str(value))
                     
-                    # Insertar en la estructura
-                    if hasattr(structure, 'add_record'):
-                        # Para sequential file
-                        structure.add_record(values)
-                    elif hasattr(structure, 'insert'):
-                        # Para otras estructuras, usar el campo clave como key
-                        key_index = next((i for i, f in enumerate(fields) if f['name'] == key_field), 0)
-                        key_value = values[key_index] if key_index < len(values) else record_count
-                        structure.insert(key_value, values)
+                    # Encontrar valor de la clave
+                    key_index = next((i for i, f in enumerate(fields) if f['name'] == key_field), 0)
+                    key_value = values[key_index] if key_index < len(values) else record_count
                     
+                    # Insertar en estructura REAL
+                    structure.insert(key_value, values)
                     record_count += 1
                 
                 return record_count
@@ -305,8 +312,8 @@ class SQLExecutor:
             return 0
     
     def _execute_select(self, plan: ExecutionPlan) -> Dict[str, Any]:
-        """Ejecuta SELECT - VERSIÓN CORREGIDA."""
         table_name = plan.data['table_name']
+        where_clause = plan.data.get('where_clause')
         
         if table_name not in self.tables:
             return {'success': False, 'error': f'Tabla "{table_name}" no existe'}
@@ -315,18 +322,32 @@ class SQLExecutor:
             table_info = self.tables[table_name]
             structure = self.structures[table_name]
             
-            # Para testing, devolver datos mock
-            if hasattr(structure, 'get_all'):
-                results = structure.get_all()
-            else:
-                results = []
+            # Si no hay WHERE, simular SELECT * (para testing)
+            if not where_clause:
+                # Esto es temporal - en producción necesitarías leer todos los registros
+                return {
+                    'success': True,
+                    'results': [f"SELECT * para {table_name} (implementar lectura completa)"],
+                    'count': 1,
+                    'message': 'SELECT * ejecutado (modo simulación)'
+                }
             
-            return {
-                'success': True,
-                'results': results[:10],  # Limitar para testing
-                'count': len(results),
-                'message': f'Encontrados {len(results)} registros'
-            }
+            # Búsqueda con WHERE
+            if where_clause.get('type') == 'comparison':
+                field = where_clause['field']
+                value = where_clause['value']
+                operator = where_clause['operator']
+                
+                if operator == '=':
+                    result = structure.search(value)
+                    return {
+                        'success': True,
+                        'results': [result] if result else [],
+                        'count': 1 if result else 0,
+                        'message': f'Encontrado: {result}' if result else 'No encontrado'
+                    }
+            
+            return {'success': False, 'error': 'Tipo de WHERE no implementado'}
             
         except Exception as e:
             return {'success': False, 'error': f'Error ejecutando SELECT: {str(e)}'}
@@ -383,7 +404,6 @@ class SQLExecutor:
             return ['SELECT * no implementado para este tipo de índice']
     
     def _execute_insert(self, plan: ExecutionPlan) -> Dict[str, Any]:
-        """Ejecuta INSERT - VERSIÓN CORREGIDA."""
         table_name = plan.data['table_name']
         values = plan.data['values']
         
@@ -394,17 +414,21 @@ class SQLExecutor:
             table_info = self.tables[table_name]
             structure = self.structures[table_name]
             
-            # Insertar en estructura
-            if hasattr(structure, 'add_record'):
-                structure.add_record(values)
-            elif hasattr(structure, 'insert'):
-                # Usar primer valor como key temporal
-                key = values[0] if values else len(structure.data)
-                structure.insert(key, values)
+            # Encontrar clave primaria
+            key_field = table_info['key_field']
+            key_index = next((i for i, f in enumerate(table_info['fields']) 
+                            if f['name'] == key_field), 0)
+            key_value = values[key_index] if key_index < len(values) else None
+            
+            if key_value is None:
+                return {'success': False, 'error': 'No se pudo determinar clave primaria'}
+            
+            # Insertar en estructura REAL
+            structure.insert(key_value, values)
             
             return {
                 'success': True, 
-                'message': f'Registro insertado en "{table_name}"',
+                'message': f'Registro insertado en "{table_name}" con clave {key_value}',
                 'values': values
             }
             
@@ -423,53 +447,6 @@ class SQLExecutor:
         # TODO: Implementar UPDATE
         return {'error': 'UPDATE no implementado aún'}
     
-    def _execute_delete(self, plan: ExecutionPlan) -> Dict[str, Any]:
-        """Ejecuta DELETE - CON DEBUG EXTENDIDO."""
-        print(f"DEBUG _execute_delete INICIADO")
-        print(f"Plan: {plan}")
-        print(f"Plan data: {plan.data}")
-        
-        table_name = plan.data['table_name']
-        where_clause = plan.data.get('where_clause')
-        
-        print(f"Table: {table_name}, Where: {where_clause}")
-        
-        if table_name not in self.tables:
-            print(f"ERROR: Tabla {table_name} no existe")
-            return {'success': False, 'error': f'Tabla "{table_name}" no existe'}
-        
-        try:
-            structure = self.structures[table_name]
-            print(f"Estructura encontrada: {type(structure)}")
-            
-            if not where_clause:
-                print(f"ERROR: Sin WHERE clause")
-                return {'success': False, 'error': 'DELETE sin WHERE no implementado por seguridad'}
-            
-            if where_clause.get('type') == 'comparison':
-                field = where_clause['field']
-                value = where_clause['value']
-                operator = where_clause['operator']
-                
-                print(f" Condición: {field} {operator} {value}")
-                
-                if operator == '=':
-                    # FORZAR ÉXITO PARA TESTING
-                    print(f"SIMULANDO DELETE EXITOSO")
-                    return {
-                        'success': True,
-                        'message': f'Registro eliminado de "{table_name}" (simulado)'
-                    }
-                else:
-                    print(f"ERROR: Operador no soportado: {operator}")
-                    return {'success': False, 'error': f'Operador {operator} no soportado en DELETE'}
-            else:
-                print(f"ERROR: Tipo de condición no soportado: {where_clause.get('type')}")
-                return {'success': False, 'error': 'Tipo de condición WHERE no soportado en DELETE'}
-                
-        except Exception as e:
-            print(f"EXCEPCIÓN en DELETE: {e}")
-            return {'success': False, 'error': f'Error eliminando registro: {str(e)}'}
     
     def list_tables(self) -> Dict[str, Any]:
         """Lista todas las tablas creadas."""
@@ -572,65 +549,4 @@ class SQLExecutor:
         except Exception as e:
             return {'success': False, 'error': f'Error creando tabla desde esquema: {e}'}
 
-    def _create_structure(self, table_name: str, index_type: str, fields: List, key_field: str):
-        """Crea estructura de datos mock mejorada."""
-        index_type = index_type.upper()
-        
-        class MockStructure:
-            def __init__(self, struct_type, table_name):
-                self.type = struct_type
-                self.table_name = table_name
-                self.records = {}  # Para sequential
-                self.data = {}     # Para otras estructuras
-                self.record_list = []  # Para SELECT *
-            
-            def add_record(self, record):
-                """Para sequential file."""
-                key = hash(str(record))  # Key simple para testing
-                self.records[key] = record
-                self.record_list.append(record)
-                return True
-            
-            def remove_record(self, key):
-                """Para sequential file."""
-                if key in self.records:
-                    del self.records[key]
-                    # También remover de record_list
-                    self.record_list = [r for r in self.record_list if hash(str(r)) != key]
-                    return True
-                return False
-            
-            def get_record(self, key):
-                return self.records.get(key)
-            
-            def get_all(self):
-                return self.record_list
-            
-            def insert(self, key, value):
-                """Para otras estructuras."""
-                self.data[key] = value
-                self.record_list.append(value)
-                return True
-            
-            def delete(self, key):
-                """Para otras estructuras."""
-                if key in self.data:
-                    value = self.data[key]
-                    del self.data[key]
-                    # Remover de record_list
-                    if value in self.record_list:
-                        self.record_list.remove(value)
-                    return True
-                return False
-            
-            def search(self, key):
-                return self.data.get(key)
-            
-            def range_search(self, start, end):
-                results = []
-                for key, value in self.data.items():
-                    if start <= key <= end:
-                        results.append((key, value))
-                return results
-        
-        return MockStructure(index_type.lower(), table_name)
+    
