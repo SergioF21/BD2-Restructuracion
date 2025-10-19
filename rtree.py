@@ -207,7 +207,20 @@ class RTree:
                         child.bbox[3] < key[1] or child.bbox[1] > key[3]):
                     self._search_recursive(child, key, results)
     
-    def range_search_radio(self, point, radius):
+    def rangeSearch(self, point, radius_or_k):
+        """
+        Range search with automatic mode detection:
+        - If radius_or_k is a float: rangeSearch(point, radius) - search within circular area
+        - If radius_or_k is an int: rangeSearch(point, k) - find k nearest neighbors
+        """
+        if isinstance(radius_or_k, float):
+            return self._range_search_radius(point, radius_or_k)
+        elif isinstance(radius_or_k, int):
+            return self._range_search_k(point, radius_or_k)
+        else:
+            raise ValueError("Second parameter must be float (radius) or int (k)")
+    
+    def _range_search_radius(self, point, radius):
         """Range search within a circular area using bbox mindist pruning."""
         results = []
         def rect_tuple_mindist(rect, point):
@@ -230,7 +243,7 @@ class RTree:
         recurse(self.root)
         return results
 
-    def range_search_k(self, point, k):
+    def _range_search_k(self, point, k):
         """Range search for the k nearest neighbors to a point."""
         results = []
         def recurse(node):

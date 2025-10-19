@@ -2,6 +2,8 @@ import pickle
 import os
 import struct
 from typing import List, Any, Optional
+from core.file_manager import FileManager
+from core.models import Table, Record
 
 class BPlusTreeNode:
     def __init__(self, order, is_leaf=False):
@@ -14,11 +16,40 @@ class BPlusTreeNode:
 
 
 class BPlusTreePersistence:
-    """Maneja la persistencia del árbol B+ en memoria secundaria."""
+    """Maneja la persistencia del árbol B+ usando archivos separados."""
     
-    def __init__(self, index_filename: str):
+    def __init__(self, index_filename: str, table: Table):
         self.index_filename = index_filename
+        self.table = table
         self.node_counter = 0
+        self._initialize_index_metadata()
+    
+    def _initialize_index_metadata(self):
+        """Inicializa los metadatos del índice."""
+        metadata_filename = self.index_filename + '.meta'
+        try:
+            with open(metadata_filename, 'rb') as f:
+                data = f.read(8)  # 4 bytes para node_counter + 4 bytes para root_id
+                if len(data) == 8:
+                    self.node_counter = struct.unpack('i', data[:4])[0]
+                    self.root_id = struct.unpack('i', data[4:8])[0]
+                else:
+                    self.node_counter = 0
+                    self.root_id = -1
+        except FileNotFoundError:
+            self.node_counter = 0
+            self.root_id = -1
+            self._save_index_metadata()
+    
+    def _save_index_metadata(self):
+        """Guarda los metadatos del índice."""
+        metadata_filename = self.index_filename + '.meta'
+        try:
+            with open(metadata_filename, 'wb') as f:
+                f.write(struct.pack('i', self.node_counter))
+                f.write(struct.pack('i', self.root_id))
+        except Exception as e:
+            print(f"Error al guardar metadatos del índice: {e}")
     
     def _generate_node_id(self) -> int:
         """Genera un ID único para cada nodo."""
@@ -35,12 +66,14 @@ class BPlusTreePersistence:
                 if isinstance(child, BPlusTreeNode):
                     self._assign_node_ids(child)
     
+    
     def save_tree(self, tree: 'BPlusTree'):
-        """Guarda el árbol B+ completo en un archivo."""
+        """Guarda el árbol B+ completo usando pickle para el índice."""
         # Asignar IDs a todos los nodos
         self._assign_node_ids(tree.root)
+        self.root_id = tree.root.node_id
         
-        # Serializar el árbol
+        # Serializar el árbol completo
         tree_data = {
             'root': tree.root,
             'order': tree.order,
@@ -49,9 +82,12 @@ class BPlusTreePersistence:
         
         with open(self.index_filename, 'wb') as f:
             pickle.dump(tree_data, f)
+        
+        # Guardar metadatos
+        self._save_index_metadata()
     
     def load_tree(self) -> Optional['BPlusTree']:
-        """Carga el árbol B+ desde un archivo."""
+        """Carga el árbol B+ desde archivo pickle."""
         if not os.path.exists(self.index_filename):
             return None
         
@@ -59,7 +95,7 @@ class BPlusTreePersistence:
             with open(self.index_filename, 'rb') as f:
                 tree_data = pickle.load(f)
             
-            tree = BPlusTree(tree_data['order'])
+            tree = BPlusTree(tree_data['order'], self.index_filename, self.table)
             tree.root = tree_data['root']
             self.node_counter = tree_data.get('node_counter', 0)
             
@@ -67,18 +103,104 @@ class BPlusTreePersistence:
         except Exception as e:
             print(f"Error al cargar el árbol B+: {e}")
             return None
+    
 
 
 class BPlusTree:
-    def __init__(self, order=4, index_filename: str = None):
+    def __init__(self, order=4, index_filename: str = None, table: Table = None):
         self.root = BPlusTreeNode(order, is_leaf=True)
         self.order = order
-        self.persistence = BPlusTreePersistence(index_filename) if index_filename else None
+        self.table = table
+        self.data_file_manager = None
+        self.persistence = None
+        
+        if index_filename and table:
+            # Crear FileManager para datos
+            data_filename = index_filename.replace('.idx', '.dat')
+            self.data_file_manager = FileManager(data_filename, table)
+            # Crear persistencia para el índice
+            self.persistence = BPlusTreePersistence(index_filename, table)
+        
         self._auto_save = True  # Guardar automáticamente después de cada operación
 
     def is_empty(self):
         """Check if the BPlus tree is empty."""
         return len(self.root.keys) == 0
+    
+    def add_record(self, record: Record) -> int:
+        """Añade un registro a la tabla y actualiza el índice."""
+        if not self.data_file_manager:
+            raise ValueError("FileManager no inicializado")
+        
+        # Añadir el registro a la tabla
+        pos = self.data_file_manager.add_record(record)
+        
+        # Actualizar el índice B+
+        self.insert(record.key, pos)
+        
+        return pos
+    
+    def get_record(self, key: Any) -> Optional[Record]:
+        """Obtiene un registro por su clave."""
+        if not self.data_file_manager:
+            raise ValueError("FileManager no inicializado")
+        
+        pos = self.search(key)
+        if pos is not None:
+            return self.data_file_manager.read_record(pos)
+        return None
+    
+    def update_record(self, key: Any, new_values: List[Any]) -> bool:
+        """Actualiza un registro existente."""
+        if not self.data_file_manager:
+            raise ValueError("FileManager no inicializado")
+        
+        pos = self.search(key)
+        if pos is not None:
+            # Crear nuevo registro con los valores actualizados
+            new_record = Record(self.table, new_values)
+            new_record.pos = pos
+            
+            # Escribir el registro actualizado
+            self.data_file_manager._write_record_at_pos(new_record, pos)
+            return True
+        return False
+    
+    def delete_record(self, key: Any) -> bool:
+        """Elimina un registro de la tabla y del índice."""
+        if not self.data_file_manager:
+            raise ValueError("FileManager no inicializado")
+        
+        pos = self.search(key)
+        if pos is not None:
+            # Eliminar del índice
+            self.delete(key)
+            
+            # Eliminar de la tabla
+            return self.data_file_manager.remove_record(pos)
+        return False
+    
+    def get_all_records(self) -> List[Record]:
+        """Obtiene todos los registros de la tabla."""
+        if not self.data_file_manager:
+            raise ValueError("FileManager no inicializado")
+        
+        return self.data_file_manager.get_all_records()
+    
+    def range_query(self, start_key: Any, end_key: Any) -> List[Record]:
+        """Realiza una consulta por rango y devuelve los registros."""
+        if not self.data_file_manager:
+            raise ValueError("FileManager no inicializado")
+        
+        positions = self.range_search(start_key, end_key)
+        records = []
+        
+        for key, pos in positions:
+            record = self.data_file_manager.read_record(pos)
+            if record:
+                records.append(record)
+        
+        return records
     
     def load_from_file(self):
         """Carga el árbol desde el archivo de persistencia."""
@@ -89,6 +211,7 @@ class BPlusTree:
                 self.order = loaded_tree.order
                 if loaded_tree.persistence:
                     self.persistence.node_counter = loaded_tree.persistence.node_counter
+                    self.persistence.root_id = loaded_tree.persistence.root_id
                 return True
         return False
     
