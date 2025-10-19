@@ -31,3 +31,9 @@ print("IDs dentro del radio:", result)
 k = 3
 result = rt_index.rtree.range_search_k(point, k)
 print(f"{k} vecinos más cercanos:", result)
+
+# Ejemplo: intersección con un bbox que es un punto
+bbox_point = (30, 30, 30, 30)
+result = rt_index.rtree.intersection_search(bbox_point)
+print(f"IDs que intersectan el punto (30, 30):", result)
+
