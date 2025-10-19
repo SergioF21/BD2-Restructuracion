@@ -45,9 +45,17 @@ select_statement: "SELECT"i select_list "FROM"i CNAME where_clause? order_clause
 select_list: "*" -> select_all
            | field_name ("," field_name)*
 
+// WHERE clause mejorado
 where_clause: "WHERE"i condition
 
-?condition: comparison (("AND"i | "OR"i) comparison)*
+?condition: comparison 
+          | between_condition
+          | spatial_condition
+          | condition ("AND"i | "OR"i) condition
+
+// Usar patrones más simples
+between_condition: field_name "BETWEEN"i value "AND"i value
+spatial_condition: field_name "IN"i "(" value "," value ")"  // point y radius como values genéricos
 
 comparison: field_name comparison_operator value
 comparison_operator: "=" | "!=" | "<>" | "<" | ">" | "<=" | ">="

@@ -204,8 +204,18 @@ class SQLTransformer(Transformer):
         
     # --- field definition and list ---
     def field_definition(self, items):
-        """Field definition mejorado para manejar Trees vacíos."""
-        print(f"DEBUG field_definition items: {items}")
+        """Field definition corregido para índices."""
+        print(f"🎯 ULTRA-DEEP DEBUG - Processing VARCHAR[20]:")
+        for i, item in enumerate(items):
+            print(f"  Item {i}: {item}")
+            if hasattr(item, 'data'):
+                print(f"     Tree data: {item.data}")
+                if hasattr(item, 'children'):
+                    print(f"     Children: {item.children}")
+                    for j, child in enumerate(item.children):
+                        print(f"       Child {j}: {child} (type: {type(child)})")
+                        if hasattr(child, 'type'):
+                            print(f"         Token type: {child.type}")
         
         if len(items) < 2:
             return None
@@ -216,49 +226,58 @@ class SQLTransformer(Transformer):
         dtype = None
         size = 0
         
-        # DEBUG profundo del dtype_info
-        print(f"DEBUG dtype_info: {dtype_info} (type: {type(dtype_info)})")
-        if hasattr(dtype_info, 'data'):
-            print(f"DEBUG dtype_info.data: {dtype_info.data}")
-            print(f"DEBUG dtype_info.children: {dtype_info.children}")
-        
-        # Estrategia 1: Si es Tree de data_type vacío, buscar en el contexto
+        # Procesar tipo de dato (mantener igual)
         if dtype_info is None or (hasattr(dtype_info, 'data') and dtype_info.data == 'data_type' and not dtype_info.children):
-            # Buscar en items siguientes si hay algún tipo
             for i in range(2, len(items)):
                 potential = self._unwrap_tree_token(items[i])
                 if isinstance(potential, str) and potential.upper() in ['INT', 'VARCHAR', 'FLOAT', 'DATE', 'ARRAY']:
                     dtype = potential
                     break
-        
-        # Estrategia 2: Procesar normal
         else:
             dtype_result = self._unwrap_tree_token(dtype_info)
-            print(f"DEBUG dtype_result: {dtype_result} (type: {type(dtype_result)})")
-            
             if isinstance(dtype_result, tuple):
                 dtype, size = dtype_result
             elif isinstance(dtype_result, str):
                 dtype = dtype_result
         
-        # Estrategia 3: Si todavía no tenemos dtype, usar lógica de backup
+        # Lógica de backup para dtype
         if dtype is None:
-            # Para el campo 'id', es probable que sea INT
             if name.lower() == 'id':
                 dtype = 'INT'
-            # Para campos con 'nombre', 'descripcion', etc, podría ser VARCHAR
             elif any(x in name.lower() for x in ['nombre', 'name', 'desc', 'description']):
                 dtype = 'VARCHAR'
-                size = 50  # tamaño por defecto
+                size = 50
         
-        # Procesar opciones de índice
+        # CORRECCIÓN: Buscar índice - manejar string literal "['SEQ']"
         index_type = None
-        if len(items) > 2:
-            for i in range(2, len(items)):
-                item = items[i]
-                unwrapped = self._unwrap_tree_token(item)
-                if isinstance(unwrapped, str) and unwrapped.upper() in ['SEQ', 'BTREE', 'EXTENDIBLEHASH', 'ISAM', 'RTREE']:
-                    index_type = unwrapped.upper()
+        for i in range(2, len(items)):
+            item = items[i]
+            unwrapped = self._unwrap_tree_token(item)
+            print(f"DEBUG index search: item={item}, unwrapped={unwrapped} (type: {type(unwrapped)})")
+            
+            # SI ES STRING LITERAL "['SEQ']", EXTRAER 'SEQ'
+            if isinstance(unwrapped, str) and unwrapped.startswith("['") and unwrapped.endswith("']"):
+                # Extraer el contenido entre [' y ']
+                index_content = unwrapped[2:-2]  # Remover "['" y "']"
+                if index_content.upper() in ['SEQ', 'BTREE', 'EXTENDIBLEHASH', 'ISAM', 'RTREE']:
+                    index_type = index_content.upper()
+                    print(f"DEBUG found index in string literal: {index_type}")
+                    break
+            
+            # O directamente un string simple
+            elif isinstance(unwrapped, str) and unwrapped.upper() in ['SEQ', 'BTREE', 'EXTENDIBLEHASH', 'ISAM', 'RTREE']:
+                index_type = unwrapped.upper()
+                print(f"DEBUG found index as simple string: {index_type}")
+                break
+            
+            # O una lista real
+            elif isinstance(unwrapped, list):
+                for subitem in unwrapped:
+                    if isinstance(subitem, str) and subitem.upper() in ['SEQ', 'BTREE', 'EXTENDIBLEHASH', 'ISAM', 'RTREE']:
+                        index_type = subitem.upper()
+                        print(f"DEBUG found index in list: {index_type}")
+                        break
+                if index_type:
                     break
         
         result = {
@@ -284,38 +303,106 @@ class SQLTransformer(Transformer):
         return "="  # Default
 
     def between_condition(self, items):
-        """Procesa condiciones BETWEEN."""
-        print(f"DEBUG between_condition items: {items}")
+        """Procesa condiciones BETWEEN - versión más flexible."""
+        print(f"BETWEEN DEBUG: {len(items)} items")
+        for i, item in enumerate(items):
+            print(f"  Item {i}: {item} (type: {type(item)})")
+            if hasattr(item, 'data'):
+                print(f"       data: {item.data}")
+            if hasattr(item, 'children'):
+                print(f"       children: {item.children}")
         
-        if len(items) >= 4:
+        # Diferentes patrones que podemos recibir
+        if len(items) == 5:
+            # Patrón: field, BETWEEN, start, AND, end
             field = self._unwrap_tree_token(items[0])
-            start = self._unwrap_tree_token(items[2])  # Saltar BETWEEN
-            end = self._unwrap_tree_token(items[4])    # Saltar AND
-            
-            return {
-                "type": "between",
-                "field": field,
-                "start": start,
-                "end": end
-            }
-        return None
+            start = self._unwrap_tree_token(items[2])
+            end = self._unwrap_tree_token(items[4])
+        elif len(items) == 3:
+            # Patrón: field, start, end (BETWEEN/AND no llegaron como tokens separados)
+            field = self._unwrap_tree_token(items[0])
+            start = self._unwrap_tree_token(items[1])
+            end = self._unwrap_tree_token(items[2])
+        else:
+            print(f"DEBUG between_condition: unexpected pattern with {len(items)} items")
+            return None
+        
+        result = {
+            "type": "between",
+            "field": field,
+            "start": start,
+            "end": end
+        }
+        print(f"DEBUG between_condition result: {result}")
+        return result
 
     def spatial_condition(self, items):
-        """Procesa condiciones espaciales IN (point, radius)."""
-        print(f"DEBUG spatial_condition items: {items}")
+        """Procesa condiciones espaciales IN (point, radius) corregido."""
+        print(f"🎯 SPATIAL DEBUG: {len(items)} items")
+        for i, item in enumerate(items):
+            print(f"  Item {i}: {item} (type: {type(item)})")
+            if hasattr(item, 'data'):
+                print(f"       data: {item.data}")
+            if hasattr(item, 'children'):
+                print(f"       children: {item.children}")
         
-        if len(items) >= 4:
+        # Diferentes patrones que podemos recibir
+        point = None
+        radius = None
+        field = None
+        
+        if len(items) >= 3:
             field = self._unwrap_tree_token(items[0])
-            point = self._unwrap_tree_token(items[3])  # Después de IN (
-            radius = self._unwrap_tree_token(items[5]) # Después de la coma
             
-            return {
-                "type": "spatial",
+            # Buscar point y radius en los items
+            for i in range(1, len(items)):
+                item = items[i]
+                unwrapped = self._unwrap_tree_token(item)
+                print(f"DEBUG spatial item {i}: {unwrapped} (type: {type(unwrapped)})")
+                
+                # Si es una tupla o lista de 2 elementos, es el point
+                if isinstance(unwrapped, (tuple, list)) and len(unwrapped) == 2:
+                    point = tuple(unwrapped)
+                    print(f"DEBUG found point: {point}")
+                
+                # Si es un número, es el radius
+                elif isinstance(unwrapped, (int, float)):
+                    radius = unwrapped
+                    print(f"DEBUG found radius: {radius}")
+        
+        # Si todavía no tenemos point, buscar específicamente
+        if point is None:
+            for item in items:
+                if hasattr(item, 'data') and item.data == 'point':
+                    point_result = self._unwrap_tree_token(item)
+                    if isinstance(point_result, (tuple, list)) and len(point_result) == 2:
+                        point = tuple(point_result)
+                        print(f"DEBUG found point in Tree: {point}")
+                        break
+        
+        if field and point is not None and radius is not None:
+            result = {
+                "type": "spatial", 
                 "field": field,
                 "point": point,
                 "radius": radius
             }
+            print(f"DEBUG spatial_condition result: {result}")
+            return result
+        
+        print(f"DEBUG spatial_condition: missing data - field={field}, point={point}, radius={radius}")
         return None
+
+    def CNAME(self, token):
+        """Debug para ver todos los CNAME tokens."""
+        result = str(token)
+        print(f"DEBUG CNAME token: '{result}'")
+        
+        # Si es una palabra clave que debería ser reconocida diferente
+        if result.upper() in ['BETWEEN', 'IN', 'AND', 'OR', 'NOT']:
+            print(f"CNAME '{result}' debería ser palabra clave")
+        
+        return result
 
     def EQUALS(self, token):
         """Procesa operador =."""
@@ -373,10 +460,13 @@ class SQLTransformer(Transformer):
         return [self._unwrap(i) for i in items]
 
     def select_statement(self, items):
+        """SELECT corregido para asignar where_clause."""
         sel = None
         table = None
         where = None
-        from lark import Token, Tree
+        
+        print(f"DEBUG select_statement items: {items}")
+        
         for it in items:
             # select_list puede venir como list o Tree('select_all')
             if isinstance(it, list):
@@ -387,8 +477,16 @@ class SQLTransformer(Transformer):
                 table = str(it)
             elif isinstance(it, str) and table is None:
                 table = it
-            elif isinstance(it, dict) and it.get('type') in ('cmp','and','or','between'):
+            elif isinstance(it, dict) and it.get('type') in ('comparison', 'between', 'spatial', 'and', 'or'):
                 where = it
+            # BUSCAR where_clause EN TREES
+            elif hasattr(it, 'data') and it.data == 'where_clause':
+                where_content = self._unwrap_tree_token(it)
+                print(f"DEBUG found where_clause tree: {where_content}")
+                if isinstance(where_content, dict):
+                    where = where_content
+        
+        print(f"DEBUG select_statement final: table={table}, where={where}")
         return ExecutionPlan('SELECT', table_name=table, select_list=sel or ['*'], where_clause=where)
 
 
@@ -522,25 +620,35 @@ class SQLTransformer(Transformer):
         return ExecutionPlan('DELETE', table_name=table, where_clause=where)
 
     def where_clause(self, items):
-        """Procesa WHERE clause."""
+        """Procesa WHERE clause con debug."""
         print(f"DEBUG where_clause input: {items}")
         
         if items:
             condition = self._unwrap_tree_token(items[0])
             print(f"DEBUG where_clause result: {condition}")
             return condition
+        
+        print("DEBUG where_clause: No items found")
         return None
 
     # --- point / radius / values helpers ---
-    def point(self, *items):
+    def point(self, items):
+        """Procesa puntos (coordenadas) corregido."""
+        print(f"DEBUG point items: {items}")
+        
         nums = []
         for it in items:
             if isinstance(it, Token):
                 nums.append(self._to_number(it))
             elif isinstance(it, (int, float)):
                 nums.append(float(it))
+        
         if len(nums) >= 2:
-            return (nums[0], nums[1])
+            result = (nums[0], nums[1])
+            print(f"DEBUG point result: {result}")
+            return result
+        
+        print(f"DEBUG point: not enough numbers ({len(nums)})")
         return None
 
     def radius(self, val):
@@ -558,8 +666,21 @@ class SQLTransformer(Transformer):
 
     
     def ESCAPED_STRING(self, token):
+        """Procesa strings escapados de forma segura."""
         s = str(token)
-        return s[1:-1].encode('utf-8').decode('unicode_escape')
+        if s.startswith(('"', "'")) and s.endswith(('"', "'")):
+            s = s[1:-1]
+        
+        # Para rutas de Windows, evitar decode unicode_escape
+        if '\\' in s and (s.startswith('C:\\') or ':\\' in s):
+            print(f"DEBUG: Ruta Windows detectada, usando raw: {s}")
+            return s
+        
+        try:
+            return s.encode('utf-8').decode('unicode_escape')
+        except UnicodeDecodeError:
+            print(f"DEBUG: Falló decode unicode_escape, usando string original: {s}")
+            return s
 
     def CNAME(self, token):
         return str(token)
@@ -631,25 +752,41 @@ class SQLTransformer(Transformer):
         return self._unwrap_tree_token(token)
 
     def data_type(self, items):
-        """Procesa tipos de datos correctamente."""
+        """Procesa tipos de datos corregido para manejar VARCHAR[20]."""
         print(f"DEBUG data_type input: {items}")
         
         if not items:
             return None
         
-        # Si es un Tree de data_type, procesar sus children
+        # Si es un Tree, procesar sus children
         if hasattr(items[0], 'data') and items[0].data == 'data_type':
-            return self._unwrap_tree_token(items[0])
+            if items[0].children:
+                first_child = items[0].children[0]
+                print(f"DEBUG data_type first child: {first_child} (type: {type(first_child)})")
+                
+                # Si es VARCHAR[20], debería tener más children
+                if len(items[0].children) > 1:
+                    dtype = self._unwrap_tree_token(first_child)
+                    size_item = items[0].children[1]
+                    print(f"DEBUG data_type size item: {size_item} (type: {type(size_item)})")
+                    
+                    if isinstance(size_item, Token) and size_item.type == 'INT':
+                        size = int(size_item)
+                        return (dtype, size)
+                    elif isinstance(size_item, int):
+                        return (dtype, size_item)
+                
+                # Tipo simple como INT, FLOAT, etc.
+                return self._unwrap_tree_token(first_child)
         
-        # Si es una lista, tomar el primer elemento
+        # Si es una lista directa
         if isinstance(items, list) and len(items) > 0:
             first_item = items[0]
             
-            # Si el primer item es un token de tipo
             if isinstance(first_item, Token) and first_item.type == 'CNAME':
                 dtype = str(first_item).upper()
                 
-                # Verificar si hay tamaño (VARCHAR[20])
+                # Verificar si hay tamaño
                 if len(items) > 1:
                     size_item = items[1]
                     if isinstance(size_item, Token) and size_item.type == 'INT':
@@ -658,7 +795,9 @@ class SQLTransformer(Transformer):
                 
                 return dtype
         
-        return self._unwrap_tree_token(items[0])
+        result = self._unwrap_tree_token(items[0])
+        print(f"DEBUG data_type final result: {result}")
+        return result
 
     def SINGLE_QUOTED_STRING(self, token):
         """Procesa strings con comillas simples."""
@@ -667,11 +806,15 @@ class SQLTransformer(Transformer):
             s = s[1:-1]
         return s.encode('utf-8').decode('unicode_escape')
 
-    def INT(self, token):
-        return "INT"
-
     def VARCHAR(self, token):
+        """Procesa token VARCHAR."""
+        print(f"DEBUG VARCHAR token: {token}")
         return "VARCHAR"
+
+    def INT(self, token):
+        """Procesa token INT."""
+        print(f"DEBUG INT token: {token}")
+        return "INT"
 
     def FLOAT(self, token):
         return "FLOAT"
@@ -681,6 +824,15 @@ class SQLTransformer(Transformer):
 
     def ARRAY(self, token):
         return "ARRAY"
+
+    def LSQB(self, token):
+        """Procesa apertura de corchete [ para tamaño."""
+        return "["
+
+    def RSQB(self, token): 
+        """Procesa cierre de corchete ] para tamaño."""
+        return "]"
+
 class SQLParser:
     """Parser SQL principal que devuelve ExecutionPlan."""
     
@@ -691,21 +843,15 @@ class SQLParser:
     def parse(self, sql_command: str) -> Union[ExecutionPlan, Dict, None]:
         """
         Parsea un comando SQL y devuelve un ExecutionPlan.
-        
-        Args:
-            sql_command: Comando SQL a parsear
-            
-        Returns:
-            ExecutionPlan o diccionario con el plan de ejecución
-            
-        Raises:
-            LarkError: Si hay errores de sintaxis
         """
         try:
             # Limpiar el comando
             sql_command = sql_command.strip()
             if not sql_command:
                 return None
+            
+            # DEBUG: Mostrar comando que se va a parsear
+            print(f"DEBUG parsing: {sql_command[:100]}...")
             
             # Parsear
             result = self.parser.parse(sql_command)
@@ -714,14 +860,16 @@ class SQLParser:
             if isinstance(result, dict) and result.get('type') == 'statement_list':
                 statements = result.get('statements', [])
                 if statements:
-                    return statements[0]  # Devolver el primer ExecutionPlan
+                    return statements[0]
                 return None
             
             return result
             
         except LarkError as e:
+            print(f"DEBUG LarkError: {e}")
             raise LarkError(f"Error de sintaxis SQL: {e}")
         except Exception as e:
+            print(f"DEBUG Internal Error: {e}")
             raise Exception(f"Error interno del parser: {e}")
     
     def parse_file(self, filename: str) -> List[ExecutionPlan]:
@@ -758,28 +906,47 @@ class SQLParser:
     def parse_file_content(self, content: str) -> List[ExecutionPlan]:
         """
         Parsea contenido de string con comandos SQL.
-        
-        Args:
-            content: Contenido con comandos SQL separados por ';'
-            
-        Returns:
-            Lista de ExecutionPlan
         """
-        # Dividir por ';' y procesar cada comando
-        commands = [cmd.strip() for cmd in content.split(';') if cmd.strip()]
-        
         plans = []
-        for command in commands:
-            # Ignorar comentarios
-            if not command.startswith('--') and not command.startswith('/*'):
-                plan = self.parse(command)
-                if plan:
-                    if isinstance(plan, dict) and plan.get('type') == 'statement_list':
-                        plans.extend(plan['statements'])
-                    else:
-                        plans.append(plan)
         
+        # Dividir por líneas primero para manejar comentarios mejor
+        lines = content.split('\n')
+        current_command = ""
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Ignorar líneas de comentario
+            if line.startswith('--') or line.startswith('/*'):
+                continue
+                
+            # Remover comentarios al final de línea
+            if '--' in line:
+                line = line.split('--')[0].strip()
+            
+            current_command += " " + line
+            
+            # Si la línea termina con ;, procesar el comando
+            if line.endswith(';') or ';' in current_command:
+                # Dividir por ; y procesar cada comando
+                commands = [cmd.strip() for cmd in current_command.split(';') if cmd.strip()]
+                for cmd in commands:
+                    if cmd and not cmd.startswith('--'):
+                        plan = self.parse(cmd)
+                        if plan:
+                            plans.append(plan)
+                current_command = ""
+        
+        # Procesar cualquier comando restante
+        if current_command.strip():
+            plan = self.parse(current_command.strip())
+            if plan:
+                plans.append(plan)
+        
+        print(f"DEBUG parse_file_content: found {len(plans)} plans")
         return plans
+    
+    
 
 def main():
     """Función principal para testing del parser."""
