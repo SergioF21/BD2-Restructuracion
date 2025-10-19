@@ -19,6 +19,9 @@ from core.databasemanager import DatabaseManager
 from core.models import Table, Field, Record
 from indexes.rtree import RTree
 from indexes.isam import ISAMIndex
+from indexes.sequential_file import SequentialIndex
+
+
 
 class SQLExecutor:
     """Executor que ejecuta ExecutionPlan sobre las estructuras de datos."""
@@ -117,9 +120,17 @@ class SQLExecutor:
         
         print(f"DEBUG _create_table_from_file: {table_name}, {file_path}, {index_type}, {key_field}")
         
-        # Verificar que el archivo existe
+        # DEBUG DETALLADO de rutas
+        print(f"DEBUG Ruta solicitada: {file_path}")
+        print(f"DEBUG Ruta absoluta: {os.path.abspath(file_path)}")
+        print(f"DEBUG Existe?: {os.path.exists(file_path)}")
+        print(f"DEBUG Directorio actual: {os.getcwd()}")
+        print(f"DEBUG Archivos en directorio actual: {os.listdir('.')}")
+        if os.path.exists('data'):
+            print(f"DEBUG Archivos en data/: {os.listdir('data')}")
+        
         if not os.path.exists(file_path):
-            return {'success': False, 'error': f'Archivo no encontrado: {file_path}'}
+            return {'success': False, 'error': f'Archivo no encontrado: {file_path}. Ruta absoluta: {os.path.abspath(file_path)}'}
         
         try:
             # Leer CSV para inferir esquema
@@ -244,12 +255,37 @@ class SQLExecutor:
             return {'success': False, 'error': f'Error creando tabla desde esquema: {e}'}
     
     def _create_structure(self, table_name: str, index_type: str, fields: List, key_field: str):
+        """Crea estructura de datos REAL"""
         index_type = index_type.upper()
         
-        print(f"DEBUG Creando estructura REAL para {table_name} con índice {index_type}")
-        
         try:
-            if index_type == 'BTREE':
+            print(f"DEBUG Creando estructura REAL: {index_type} para {table_name}")
+            
+            # Para Sequential File necesitamos crear el objeto Table
+            if index_type == 'SEQ':
+                # Crear objeto Table con los campos
+                table_fields = []
+                for field_info in fields:
+                    # Convertir tipos string a clases Python
+                    if field_info['type'] == 'INT':
+                        data_type = int
+                    elif field_info['type'] == 'FLOAT':
+                        data_type = float
+                    else:  # VARCHAR y otros
+                        data_type = str
+                    
+                    table_fields.append(Field(
+                        name=field_info['name'],
+                        data_type=data_type,
+                        size=field_info.get('size', 50)
+                    ))
+                
+                # Crear objeto Table
+                table_obj = Table(name=table_name, fields=table_fields, key_field=key_field)
+                structure = SequentialIndex(f"data/{table_name}.dat", table_obj)
+                print(f"DEBUG Sequential File creado: {type(structure)}")
+                
+            elif index_type == 'BTREE':
                 structure = BPlusTree(order=4, index_filename=f"data/{table_name}_btree.idx")
                 print(f"DEBUG B+ Tree creado: {type(structure)}")
                 

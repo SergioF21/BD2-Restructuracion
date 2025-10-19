@@ -126,12 +126,8 @@ class SequentialIndex:
         self.aux_records_count = 0
         print("Reconstrucción completada.")
 
-    def search(self, key: Any) -> Union[Record, None]:
-        """
-        Busca una clave[cite: 17].
-        Primero busca en el .dat (con búsqueda binaria).
-        Si no lo encuentra, busca en el .aux (con búsqueda lineal).
-        """
+    def _search_record(self, key: Any) -> Union[Record, None]:
+        """Método interno que busca y devuelve Record (para uso interno)"""
         # 1. Búsqueda binaria en el archivo principal (.dat)
         record = self._binary_search_data_file(key)
         if record:
@@ -139,10 +135,18 @@ class SequentialIndex:
             
         # 2. Búsqueda lineal en el archivo auxiliar (.aux)
         record = self._linear_search_aux_file(key)
-        if record:
-            return record
+        return record
 
+    def search(self, key: Any) -> Any:
+        """
+        Busca por clave y devuelve el valor (lista de valores).
+        En lugar del objeto Record completo.
+        """
+        record = self._search_record(key)  # Método interno que busca Record
+        if record:
+            return record.values  # Devuelve solo los valores
         return None
+
 
     def _binary_search_data_file(self, key: Any) -> Union[Record, None]:
         """Helper: Búsqueda binaria en el archivo .dat físicamente ordenado."""
@@ -192,17 +196,14 @@ class SequentialIndex:
 
     def rangeSearch(self, begin_key: Any, end_key: Any) -> List[Record]:
         """
-        Búsqueda por rango[cite: 19].
-        1. Recorre secuencialmente el .dat (desde begin_key)
-        2. Recorre linealmente TODO el .aux
+        Búsqueda por rango ORIGINAL que devuelve Records.
+        Para uso interno por range_search().
         """
         results = []
         
         # 1. Búsqueda en .dat
         try:
             with open(self.data_filename, 'rb') as f_main:
-                # (Optimización: podrías hacer BSearch para encontrar el 'begin_key' y empezar a leer desde ahí)
-                # Por simplicidad, un scan completo funciona:
                 while True:
                     data = f_main.read(self.record_size)
                     if not data:
@@ -236,6 +237,14 @@ class SequentialIndex:
             pass
             
         return results
+
+    def range_search(self, begin_key: Any, end_key: Any) -> List[Any]:
+        """
+        Búsqueda por rango - nombre estandarizado.
+        Devuelve lista de valores, no Records.
+        """
+        records = self.rangeSearch(begin_key, end_key)  # Llama al método original
+        return [record.values for record in records]  # Convierte a valores
 
     def remove(self, key: Any) -> bool:
         """
@@ -304,15 +313,20 @@ class SequentialIndex:
     # --- Métodos requeridos por la interfaz genérica de DatabaseManager ---
     # (Estos métodos son para que se parezca a BPlusTree e ISAM)
 
-    def insert(self, key: Any, pos_or_record: Any):
+    def insert(self, key: Any, value: Any):
         """
-        'pos_or_record' en este caso DEBE ser el objeto Record completo,
-        ya que 'pos' no tiene sentido para esta técnica.
+        Inserta clave/valor en Sequential File.
+        Ahora acepta (key, value) como las otras estructuras.
         """
-        if isinstance(pos_or_record, Record):
-            self.add(pos_or_record)
+        # Convertir value a Record si es necesario
+        if isinstance(value, Record):
+            record = value
         else:
-            raise ValueError("SequentialIndex.insert espera un objeto Record, no una posición.")
+            # Asumir que value es una lista de valores para el Record
+            record = Record(self.table, value)
+        
+        # Llamar al método original add
+        return self.add(record)
 
     def delete(self, key: Any) -> bool:
         """Wrapper para remove que devuelve el resultado."""
