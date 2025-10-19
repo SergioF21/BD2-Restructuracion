@@ -207,7 +207,20 @@ class RTree:
                         child.bbox[3] < key[1] or child.bbox[1] > key[3]):
                     self._search_recursive(child, key, results)
     
-    def range_search_radio(self, point, radius):
+    def rangeSearch(self, point, radius_or_k):
+        """
+        Range search with automatic mode detection:
+        - If radius_or_k is a float: rangeSearch(point, radius) - search within circular area
+        - If radius_or_k is an int: rangeSearch(point, k) - find k nearest neighbors
+        """
+        if isinstance(radius_or_k, float):
+            return self._range_search_radius(point, radius_or_k)
+        elif isinstance(radius_or_k, int):
+            return self._range_search_k(point, radius_or_k)
+        else:
+            raise ValueError("Second parameter must be float (radius) or int (k)")
+    
+    def _range_search_radius(self, point, radius):
         """Range search within a circular area using bbox mindist pruning."""
         results = []
         def rect_tuple_mindist(rect, point):
@@ -230,7 +243,7 @@ class RTree:
         recurse(self.root)
         return results
 
-    def range_search_k(self, point, k):
+    def _range_search_k(self, point, k):
         """Range search for the k nearest neighbors to a point."""
         results = []
         def recurse(node):
@@ -410,27 +423,27 @@ if __name__ == "__main__":
         print("After deletions - total:", len(t.search((-1, -1, 30, 30))))
 
     def range_radio_test():
-        print("\n=== range_search_radio test ===")
+        print("\n=== rangeSearch radius test ===")
         t = RTree(max_children=4)
         t.insert(("A", 1, 1))
         t.insert(("B", 2, 2))
         t.insert(("C", 3, 3))
         t.insert(("D", 5, 5))
         # circle centered at (2,2) radius 1.1 -> should include B only
-        res = t.range_search_radio((2, 2), 1.1)
-        print("range_search_radio((2,2),1.1):", res)
+        res = t.rangeSearch((2, 2), 1.1)
+        print("rangeSearch((2,2),1.1):", res)
         assert "B" in res and "A" not in res
 
     def knn_test():
-        print("\n=== range_search_k (k-NN) test ===")
+        print("\n=== rangeSearch k-NN test ===")
         t = RTree(max_children=4)
         t.insert(("A", 1, 1))
         t.insert(("B", 2, 2))
         t.insert(("C", 3, 3))
         t.insert(("D", 5, 5))
         # nearest 2 to (2.1,2.1) should be B and C (in that order)
-        res = t.range_search_k((2.1, 2.1), 2)
-        print("range_search_k((2.1,2.1),2):", res)
+        res = t.rangeSearch((2.1, 2.1), 2)
+        print("rangeSearch((2.1,2.1),2):", res)
         assert res and res[0] == "B"
 
     def intersection_test():
