@@ -1,9 +1,9 @@
 import os
 from core.models import Table, Record, Field
 from core.file_manager import FileManager
-from bplus import BPlusTree
-from isam import ISAMIndex
-from sequential_file import SequentialIndex  # NUEVO IMPORT
+from indexes.bplus import BPlusTree
+from indexes.isam import ISAMIndex
+from indexes.sequential_file import SequentialIndex  # NUEVO IMPORT
 from typing import List, Union, Any
 
 
