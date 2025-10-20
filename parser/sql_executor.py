@@ -791,6 +791,7 @@ class SQLExecutor:
             'fields': len(table_info['fields'])  # Corregido: usar 'fields' en lugar de 'table.fields'
         }
 
+
     def _execute_create_table(self, plan: ExecutionPlan) -> Dict[str, Any]:
         """Ejecuta CREATE TABLE."""
         result = super()._execute_create_table(plan) if hasattr(super(), '_execute_create_table') else None
@@ -807,4 +808,198 @@ class SQLExecutor:
             self._save_metadata()
         
         return result
+    
 
+    def _execute_where_clause(self, structure, where_clause, index_type):
+        """Ejecuta cláusula WHERE USANDO los índices para optimizar."""
+        condition_type = where_clause['type']
+        field = where_clause['field']
+        
+        # Obtener información de la tabla para saber cuál es el key_field
+        table_name = None
+        for tbl_name, tbl_info in self.tables.items():
+            if self.structures.get(tbl_name) == structure:
+                table_name = tbl_name
+                break
+        
+        if not table_name:
+            print("ERROR: No se encontró tabla para la estructura")
+            return []
+        
+        table_info = self.tables[table_name]
+        key_field = table_info['key_field']
+        fields_info = table_info['fields']
+        
+        # BÚSQUEDA POR IGUALDAD
+        if condition_type == 'comparison':
+            value = where_clause['value']
+            operator = where_clause['operator']
+            
+            if operator == '=':
+                # ✅ VERIFICAR SI ES BÚSQUEDA POR CLAVE PRIMARIA
+                if field == key_field:
+                    # **USA EL ÍNDICE** para búsqueda rápida por clave
+                    print(f"DEBUG Búsqueda por clave primaria: {field} = {value}")
+                    
+                    if index_type in ['BTREE', 'ISAM', 'EXTENDIBLEHASH']:
+                        result = structure.search(value)
+                        if result:
+                            if isinstance(result, dict):
+                                return [result]
+                            elif isinstance(result, (list, tuple)):
+                                field_names = [f['name'] for f in fields_info]
+                                return [dict(zip(field_names, result))]
+                            else:
+                                return [{'data': str(result)}]
+                        return []
+                        
+                    elif index_type in ['SEQ', 'SEQUENTIAL']:
+                        record = structure.search(value)
+                        print(f"DEBUG Resultado de search: {type(record)}, valor: {record}")
+                        
+                        if record:
+                            # Verificar el tipo de 'record'
+                            if hasattr(record, 'values') and hasattr(record, 'table'):
+                                field_names = [f.name for f in record.table.fields]
+                                return [dict(zip(field_names, record.values))]
+                            elif isinstance(record, (list, tuple)):
+                                field_names = [f['name'] for f in fields_info]
+                                return [dict(zip(field_names, record))]
+                            elif isinstance(record, dict):
+                                return [record]
+                            else:
+                                print(f"WARN: Tipo de record desconocido: {type(record)}")
+                                return [{'data': str(record)}]
+                        return []
+                        
+                    elif index_type == 'RTREE':
+                        pos = structure.search(value)
+                        if pos is not None:
+                            if isinstance(pos, dict):
+                                return [pos]
+                            elif isinstance(pos, (list, tuple)):
+                                field_names = [f['name'] for f in fields_info]
+                                return [dict(zip(field_names, pos))]
+                            else:
+                                return [{'data': str(pos)}]
+                        return []
+                else:
+                    # ✅ BÚSQUEDA POR CAMPO NO CLAVE - SCAN COMPLETO
+                    print(f"WARN: Búsqueda por campo NO clave ({field}), requiere scan completo")
+                    return self._scan_with_field_condition(structure, field, operator, value, index_type)
+            else:
+                # Para otros operadores (>, <, >=, <=), scan completo
+                return self._scan_with_field_condition(structure, field, operator, value, index_type)
+        
+        # BÚSQUEDA POR RANGO
+        elif condition_type == 'between':
+            start, end = where_clause['start'], where_clause['end']
+            
+            # Solo usar range_search si es sobre la clave primaria
+            if field == key_field:
+                if index_type == 'BTREE':
+                    positions = structure.range_search(start, end)
+                    results = []
+                    for key, pos in positions:
+                        if isinstance(pos, dict):
+                            results.append(pos)
+                        elif isinstance(pos, (list, tuple)):
+                            field_names = [f['name'] for f in fields_info]
+                            results.append(dict(zip(field_names, pos)))
+                    return results
+                    
+                elif index_type == 'ISAM':
+                    positions = structure.range_search(start, end)
+                    results = []
+                    for key, pos in positions:
+                        if isinstance(pos, dict):
+                            results.append(pos)
+                        elif isinstance(pos, (list, tuple)):
+                            field_names = [f['name'] for f in fields_info]
+                            results.append(dict(zip(field_names, pos)))
+                    return results
+                    
+                elif index_type in ['SEQ', 'SEQUENTIAL']:
+                    records = structure.rangeSearch(start, end)
+                    if records:
+                        results = []
+                        for r in records:
+                            if hasattr(r, 'values') and hasattr(r, 'table'):
+                                field_names = [f.name for f in r.table.fields]
+                                results.append(dict(zip(field_names, r.values)))
+                            elif isinstance(r, dict):
+                                results.append(r)
+                            elif isinstance(r, (list, tuple)):
+                                field_names = [f['name'] for f in fields_info]
+                                results.append(dict(zip(field_names, r)))
+                        return results
+                    return []
+            else:
+                print(f"WARN: BETWEEN en campo NO clave ({field}), requiere scan completo")
+                return self._scan_with_range_condition(structure, field, start, end, index_type)
+        
+        # BÚSQUEDA ESPACIAL
+        elif condition_type == 'spatial':
+            point = where_clause['point']
+            radius_or_k = where_clause.get('radius') or where_clause.get('k', 10)
+            
+            if index_type == 'RTREE':
+                ids = structure.spatial_search(point, radius_or_k)
+                results = []
+                for item in ids:
+                    if isinstance(item, dict):
+                        results.append(item)
+                    elif isinstance(item, (list, tuple)):
+                        field_names = [f['name'] for f in fields_info]
+                        results.append(dict(zip(field_names, item)))
+                return results
+            else:
+                return []
+        
+        return []
+    
+    def _scan_with_field_condition(self, structure, field, operator, value, index_type):
+        """Realiza un scan completo para buscar por un campo que NO es clave."""
+        print(f"DEBUG Realizando scan completo: {field} {operator} {value}")
+        
+        # Obtener todos los registros
+        all_records = self._select_all(structure, index_type)
+        
+        # Filtrar por condición
+        results = []
+        for record in all_records:
+            if isinstance(record, dict) and field in record:
+                record_value = record[field]
+                
+                # Aplicar operador
+                if operator == '=' and record_value == value:
+                    results.append(record)
+                elif operator == '>' and record_value > value:
+                    results.append(record)
+                elif operator == '<' and record_value < value:
+                    results.append(record)
+                elif operator == '>=' and record_value >= value:
+                    results.append(record)
+                elif operator == '<=' and record_value <= value:
+                    results.append(record)
+                elif operator == '!=' and record_value != value:
+                    results.append(record)
+        
+        print(f"DEBUG Scan completado: {len(results)} registros encontrados")
+        return results
+    
+    def _scan_with_range_condition(self, structure, field, start, end, index_type):
+        """Realiza un scan completo para BETWEEN en campo NO clave."""
+        print(f"DEBUG Realizando scan completo para rango: {field} BETWEEN {start} AND {end}")
+        
+        all_records = self._select_all(structure, index_type)
+        
+        results = []
+        for record in all_records:
+            if isinstance(record, dict) and field in record:
+                record_value = record[field]
+                if start <= record_value <= end:
+                    results.append(record)
+        
+        print(f"DEBUG Scan de rango completado: {len(results)} registros encontrados")
+        return results

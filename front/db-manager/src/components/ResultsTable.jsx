@@ -4,9 +4,10 @@ import { DataGrid } from '@mui/x-data-grid';
 
 export default function ResultsTable({ results, stats, currentPage, totalRows, onPageChange, loading = false }) {
   const handlePageChange = (newPage) => {
-    onPageChange(newPage + 1); // DataGrid usa 0-based, nosotros 1-based
+    onPageChange(newPage + 1);
   };
-  // Normalize results shape: { data: { columns, rows }, totalRows } or legacy { columns, rows }
+
+  // Normalize results
   let cols = [];
   let rows = [];
   if (results) {
@@ -19,11 +20,32 @@ export default function ResultsTable({ results, stats, currentPage, totalRows, o
     }
   }
 
-  // Convert columns (array of strings) to DataGrid column defs
-  const dgColumns = (Array.isArray(cols) ? cols : []).map(c => ({ field: c, headerName: String(c), flex: 1 }));
+  // Si no hay datos, mostrar mensaje
+  if (!cols || cols.length === 0) {
+    return (
+      <Box sx={{ padding: 2, textAlign: 'center' }}>
+        <Typography variant="body2" color="text.secondary">
+          No hay resultados. Ejecuta una consulta SQL.
+        </Typography>
+      </Box>
+    );
+  }
 
-  // Ensure each row has an 'id' field (DataGrid requirement)
-  const dgRows = (Array.isArray(rows) ? rows : []).map((r, i) => ({ id: r.id ?? i, ...r }));
+  // Convert columns
+  const dgColumns = cols.map(c => ({ 
+    field: c, 
+    headerName: String(c), 
+    flex: 1 
+  }));
+
+  // Ensure each row has an 'id'
+  const dgRows = rows.map((r, i) => ({ 
+    id: r.id ?? i, 
+    ...r 
+  }));
+
+  // ✅ Crear key único basado en los datos
+  const tableKey = `${cols.join('-')}-${rows.length}-${Date.now()}`;
 
   return (
     <Box sx={{ flexGrow: 1, height: '400px' }}>
@@ -31,9 +53,12 @@ export default function ResultsTable({ results, stats, currentPage, totalRows, o
         <Typography variant="h6" sx={{ marginBottom: '8px', color: 'text.primary' }}>
           Resultados de la consulta
         </Typography>
-  <Typography variant="caption" sx={{ color: 'text.secondary' }}>{stats}</Typography>
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          {stats || `${rows.length} filas`}
+        </Typography>
       </Box>
       <DataGrid
+        key={tableKey}
         rows={dgRows}
         columns={dgColumns}
         pagination
@@ -42,7 +67,7 @@ export default function ResultsTable({ results, stats, currentPage, totalRows, o
         rowCount={totalRows}
         paginationMode="server"
         onPageChange={handlePageChange}
-        loading={!!loading}
+        loading={loading}
         density="compact"
         autoHeight={false}
       />
