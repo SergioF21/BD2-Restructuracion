@@ -348,3 +348,47 @@ class SequentialIndex:
     def is_empty(self) -> bool:
         return self._get_aux_count() == 0 and \
                (not os.path.exists(self.data_filename) or os.path.getsize(self.data_filename) == 0)
+
+    def get_all(self) -> List[Record]:
+        """
+        Retorna TODOS los registros no borrados del archivo principal y auxiliar.
+        Útil para SELECT * FROM tabla.
+        """
+        results = []
+        
+        # 1. Leer todos los registros del archivo principal (.dat)
+        try:
+            with open(self.data_filename, 'rb') as f_main:
+                while True:
+                    data = f_main.read(self.record_size)
+                    if not data:
+                        break
+                    record = Record.unpack(self.table, data)
+                    
+                    # Solo incluir registros no borrados (next == 0)
+                    if record.next == 0:
+                        results.append(record)
+                        
+        except FileNotFoundError:
+            pass  # Si no existe el archivo principal, continuar
+        
+        # 2. Leer todos los registros del archivo auxiliar (.aux)
+        try:
+            with open(self.aux_filename, 'rb') as f_aux:
+                while True:
+                    data = f_aux.read(self.record_size)
+                    if not data:
+                        break
+                    record = Record.unpack(self.table, data)
+                    
+                    # Solo incluir registros no borrados (next == 0)
+                    if record.next == 0:
+                        results.append(record)
+                        
+        except FileNotFoundError:
+            pass  # Si no existe el archivo auxiliar, continuar
+        
+        # 3. Ordenar los resultados por clave (opcional pero útil)
+        results.sort(key=lambda r: r.key)
+        
+        return results

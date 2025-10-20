@@ -1,31 +1,11 @@
-id,product_name,price,category,rating,stock_quantity,created_date
-1,Laptop Gaming Pro,1299.99,Electronics,4.5,25,2023-01-15
-2,Wireless Headphones,89.99,Electronics,4.2,150,2023-01-16
-3,Coffee Maker Deluxe,45.50,Home,4.0,75,2023-01-17
-4,Running Shoes,120.00,Sports,4.7,200,2023-01-18
-5,Smartphone X1,899.99,Electronics,4.3,80,2023-01-19
-6,Desk Chair Ergonomic,199.99,Office,4.1,60,2023-01-20
-7,Bluetooth Speaker,79.99,Electronics,4.4,120,2023-01-21
-8,Yoga Mat Premium,35.99,Sports,4.6,180,2023-01-22
-9,Stand Mixer Kitchen,299.99,Home,4.8,40,2023-01-23
-10,Office Desk Wood,249.99,Office,4.2,30,2023-01-24
-11,Tablet Pro 10,599.99,Electronics,4.5,65,2023-01-25
-12,Water Bottle Steel,24.99,Sports,4.3,300,2023-01-26
-13,LED Monitor 24,179.99,Electronics,4.4,90,2023-01-27
-14,Bookshelf Oak,159.99,Home,4.0,45,2023-01-28
-15,Gaming Mouse,49.99,Electronics,4.6,200,2023-01-29
-16,Workout Bench,149.99,Sports,4.5,35,2023-01-30
-17,Keyboard Mechanical,129.99,Office,4.7,85,2023-02-01
-18,Air Fryer Compact,89.99,Home,4.4,70,2023-02-02
-19,Webcam HD,79.99,Electronics,4.2,110,2023-02-03
-20,Desk Lamp LED,39.99,Office,4.1,125,2023-02-04
-21,Blender Smoothie,69.99,Home,4.3,95,2023-02-05
-22,Tennis Racket Pro,159.99,Sports,4.8,25,2023-02-06
-23,SSD 1TB,129.99,Electronics,4.9,180,2023-02-07
-24,Office Chair Mesh,189.99,Office,4.0,50,2023-02-08
-25,Skateboard Complete,89.99,Sports,4.4,40,2023-02-09
-26,Smart Watch Sport,199.99,Electronics,4.5,75,2023-02-10
-27,Pressure Cooker,119.99,Home,4.6,55,2023-02-11
-28,Monitor Stand,29.99,Office,4.2,200,2023-02-12
-29,Dumbbells Set 20kg,79.99,Sports,4.7,30,2023-02-13
-30,Electric Toothbrush,59.99,Home,4.5,140,2023-02-14
+id,nombre,fechaRegistro,ubicacion_x,ubicacion_y,rating
+1,La Pizza Loca,2024-01-15,-12.0464,-77.0428,4.5
+2,El Buen Sabor,2024-02-20,-12.0500,-77.0300,4.8
+3,Café Central,2024-03-10,-12.0480,-77.0410,4.2
+4,Sushi Bar,2024-04-05,-12.0455,-77.0390,4.9
+5,Parrilla Criolla,2024-05-12,-12.0490,-77.0350,4.6
+6,Veggie Delight,2024-06-01,-12.0470,-77.0420,4.3
+7,Taco Loco,2024-07-15,-12.0485,-77.0365,4.7
+8,Burger House,2024-08-20,-12.0475,-77.0405,4.4
+9,Pasta Italia,2024-09-10,-12.0460,-77.0385,4.8
+10,Cevichería Mar,2024-10-05,-12.0495,-77.0375,4.9

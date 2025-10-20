@@ -1,0 +1,46 @@
+{
+  "Restaurantes": {
+    "table_name": "Restaurantes",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INT",
+        "size": 0,
+        "index": null
+      },
+      {
+        "name": "nombre",
+        "type": "VARCHAR",
+        "size": 50,
+        "index": null
+      },
+      {
+        "name": "fechaRegistro",
+        "type": "VARCHAR",
+        "size": 50,
+        "index": null
+      },
+      {
+        "name": "ubicacion_x",
+        "type": "VARCHAR",
+        "size": 50,
+        "index": null
+      },
+      {
+        "name": "ubicacion_y",
+        "type": "VARCHAR",
+        "size": 50,
+        "index": null
+      },
+      {
+        "name": "rating",
+        "type": "FLOAT",
+        "size": 0,
+        "index": null
+      }
+    ],
+    "index_type": "SEQ",
+    "key_field": "id",
+    "source_file": "C:\\Users\\Gianpier\\Documents\\PFINALBD2\\BD2-Restructuracion\\data\\restaurantes.csv"
+  }
+}
