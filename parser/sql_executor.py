@@ -66,9 +66,9 @@ class SQLExecutor:
                 raise RuntimeError(f"No se pudo recargar estructura de {table_name}")
             
             self.structures[table_name] = structure
-            print(f"✅ Estructura recargada: {table_name} ({type(structure).__name__})")
+            print(f"OK Estructura recargada: {table_name} ({type(structure).__name__})")
         except Exception as e:
-            print(f"❌ ERROR recargando estructura {table_name}: {e}")
+            print(f"ERROR recargando estructura {table_name}: {e}")
             import traceback
             traceback.print_exc()
             # No agregar a structures si falló
@@ -197,10 +197,10 @@ class SQLExecutor:
             fields = []
             for col_name in field_names:
                 # Determinar tipo basado en nombre de columna
-                if col_name.lower() in ['id', 'codigo', 'numero']:
+                if col_name.lower() in ['id', 'codigo', 'numero', 'usuario_id']:
                     data_type = 'INT'
                     size = 0
-                elif col_name.lower() in ['precio', 'valor', 'costo', 'rating']:
+                elif col_name.lower() in ['precio', 'valor', 'costo', 'rating', 'total', 'ubicacion_x', 'ubicacion_y']:
                     data_type = 'FLOAT'
                     size = 0
                 else:
@@ -340,22 +340,44 @@ class SQLExecutor:
                 os.makedirs('data', exist_ok=True)
                 
                 structure = SequentialIndex(f"data/{table_name}.dat", table_obj)
-                print(f"✅ Sequential File creado: {type(structure)}")
+                print(f"OK Sequential File creado: {type(structure)}")
                 
             elif index_type == 'BTREE':
                 os.makedirs('data', exist_ok=True)
                 structure = BPlusTree(order=4, index_filename=f"data/{table_name}_btree.idx")
-                print(f"✅ B+ Tree creado: {type(structure)}")
+                print(f"OK B+ Tree creado: {type(structure)}")
                 
             elif index_type == 'ISAM':
+                # Crear objeto Table con los campos
+                table_fields = []
+                for field_info in fields:
+                    # Convertir tipos string a clases Python
+                    field_type = field_info.get('type', 'VARCHAR')
+                    
+                    if field_type == 'INT' or field_type == int:
+                        data_type = int
+                    elif field_type == 'FLOAT' or field_type == float:
+                        data_type = float
+                    else:  # VARCHAR y otros
+                        data_type = str
+                    
+                    table_fields.append(Field(
+                        name=field_info['name'],
+                        data_type=data_type,
+                        size=field_info.get('size', 50)
+                    ))
+                
+                # Crear objeto Table
+                table_obj = Table(name=table_name, fields=table_fields, key_field=key_field)
+                
                 os.makedirs('data', exist_ok=True)
-                structure = ISAMIndex(f"data/{table_name}_isam.dat")
-                print(f"✅ ISAM creado: {type(structure)}")
+                structure = ISAMIndex(f"data/{table_name}_isam.dat", table=table_obj)
+                print(f"OK ISAM creado: {type(structure)}")
                 
             elif index_type == 'EXTENDIBLEHASH':
                 os.makedirs('data', exist_ok=True)
                 structure = ExtendibleHashing(bucketSize=3, index_filename=f"data/{table_name}_hash.idx")
-                print(f"✅ Extendible Hashing creado: {type(structure)}")
+                print(f"OK Extendible Hashing creado: {type(structure)}")
                 
             elif index_type == 'RTREE':
                 # Para R-tree necesitamos identificar campos espaciales
@@ -399,7 +421,7 @@ class SQLExecutor:
                     fields=spatial_field_objects,
                     max_children=4
                 )
-                print(f"✅ R-tree creado exitosamente: {type(structure)}")
+                print(f"OK R-tree creado exitosamente: {type(structure)}")
         
             else:
                 raise ValueError(f"Tipo de índice no soportado: {index_type}")
@@ -408,11 +430,11 @@ class SQLExecutor:
             if structure is None:
                 raise RuntimeError(f"La estructura {index_type} no se creó correctamente")
             
-            print(f"✅ Estructura creada exitosamente: {type(structure)}")
+            print(f"OK Estructura creada exitosamente: {type(structure)}")
             return structure
             
         except Exception as e:
-            print(f"❌ ERROR creando estructura real: {e}")
+            print(f"ERROR creando estructura real: {e}")
             import traceback
             traceback.print_exc()
             raise  # ✅ LANZAR excepción en lugar de retornar None
@@ -530,7 +552,7 @@ class SQLExecutor:
         
         # ✅ VERIFICAR estructura
         if table_name not in self.structures:
-            print(f"❌ ERROR: Estructura de {table_name} no está en self.structures")
+            print(f"ERROR: Estructura de {table_name} no está en self.structures")
             print(f"DEBUG Estructuras disponibles: {list(self.structures.keys())}")
             return {'success': False, 'error': f'Estructura de {table_name} no cargada. Tablas disponibles: {list(self.structures.keys())}'}
         
@@ -538,7 +560,7 @@ class SQLExecutor:
         
         # ✅ VERIFICAR que no sea None
         if structure is None:
-            print(f"❌ ERROR: La estructura de {table_name} es None")
+            print(f"ERROR: La estructura de {table_name} es None")
             return {'success': False, 'error': f'La estructura de {table_name} no se cargó correctamente'}
         
         print(f"DEBUG Estructura obtenida: {type(structure).__name__}")
@@ -569,7 +591,7 @@ class SQLExecutor:
                 'index_type': index_type
             }
         except Exception as e:
-            print(f"❌ ERROR en _execute_select: {e}")
+            print(f"ERROR en _execute_select: {e}")
             import traceback
             traceback.print_exc()
             return {'success': False, 'error': str(e)}
@@ -698,7 +720,24 @@ class SQLExecutor:
                     records = structure.get_all()
                     if not records:
                         return []
-                    return [r if isinstance(r, dict) else {'data': str(r)} for r in records]
+                    
+                    # Convertir Record a diccionarios
+                    results = []
+                    for record in records:
+                        if hasattr(record, 'values'):
+                            if isinstance(record.values, dict):
+                                results.append(record.values)
+                            elif isinstance(record.values, (list, tuple)):
+                                # Crear diccionario con nombres de campos
+                                field_names = [f.name for f in record.table.fields]
+                                results.append(dict(zip(field_names, record.values)))
+                            else:
+                                results.append({'data': str(record.values)})
+                        else:
+                            # Si no tiene .values, usar el objeto directamente
+                            results.append({'data': str(record)})
+                    
+                    return results
                 else:
                     print("WARN: ISAM no tiene método get_all")
                     return []
@@ -717,7 +756,7 @@ class SQLExecutor:
             return []  # ✅ Siempre retornar lista
             
         except Exception as e:
-            print(f"❌ ERROR en _select_all: {e}")
+            print(f"ERROR en _select_all: {e}")
             import traceback
             traceback.print_exc()
             return []  # ✅ Retornar lista vacía en caso de error
@@ -841,7 +880,19 @@ class SQLExecutor:
                     # **USA EL ÍNDICE** para búsqueda rápida por clave
                     print(f"DEBUG Búsqueda por clave primaria: {field} = {value}")
                     
-                    if index_type in ['BTREE', 'ISAM', 'EXTENDIBLEHASH']:
+                    if index_type in ['BTREE', 'EXTENDIBLEHASH']:
+                        result = structure.search(value)
+                        if result:
+                            if isinstance(result, dict):
+                                return [result]
+                            elif isinstance(result, (list, tuple)):
+                                field_names = [f['name'] for f in fields_info]
+                                return [dict(zip(field_names, result))]
+                            else:
+                                return [{'data': str(result)}]
+                        return []
+                        
+                    elif index_type == 'ISAM':
                         result = structure.search(value)
                         if result:
                             if isinstance(result, dict):
@@ -909,14 +960,19 @@ class SQLExecutor:
                     return results
                     
                 elif index_type == 'ISAM':
-                    positions = structure.range_search(start, end)
+                    records = structure.range_search(start, end)
                     results = []
-                    for key, pos in positions:
-                        if isinstance(pos, dict):
-                            results.append(pos)
-                        elif isinstance(pos, (list, tuple)):
-                            field_names = [f['name'] for f in fields_info]
-                            results.append(dict(zip(field_names, pos)))
+                    for record in records:
+                        if hasattr(record, 'values'):
+                            if isinstance(record.values, dict):
+                                results.append(record.values)
+                            elif isinstance(record.values, (list, tuple)):
+                                field_names = [f['name'] for f in fields_info]
+                                results.append(dict(zip(field_names, record.values)))
+                            else:
+                                results.append({'data': str(record.values)})
+                        else:
+                            results.append({'data': str(record)})
                     return results
                     
                 elif index_type in ['SEQ', 'SEQUENTIAL']:

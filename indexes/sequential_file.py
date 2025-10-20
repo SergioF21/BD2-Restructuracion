@@ -248,12 +248,12 @@ class SequentialIndex:
 
     def remove(self, key: Any) -> bool:
         """
-        Propuesta de eliminación [cite: 22-23]: Eliminación Lógica (Tombstone).
-        Marcamos el registro como "borrado" (usando record.next = -1).
-        La reconstrucción (_rebuild) se encargará de purgarlo físicamente.
+        Eliminación mejorada: Elimina físicamente el registro y reconstruye inmediatamente.
+        Esto evita problemas con tombstones y permite reinsertar la misma clave.
         """
         
-        # 1. Intentar encontrar y marcar en .dat
+        # 1. Buscar el registro en .dat
+        found_in_dat = False
         try:
             with open(self.data_filename, 'r+b') as f:
                 f.seek(0, os.SEEK_END)
@@ -275,7 +275,8 @@ class SequentialIndex:
                             record.next = -1 # Marcar como borrado
                             f.seek(offset) # Regresar a la posición
                             f.write(record.pack()) # Sobrescribir
-                            return True
+                            found_in_dat = True
+                            break
                         else:
                             return False # Ya estaba borrado
                     elif record.key < key:
@@ -285,28 +286,36 @@ class SequentialIndex:
         except FileNotFoundError:
             pass
             
-        # 2. Si no, intentar encontrar y marcar en .aux
-        try:
-            with open(self.aux_filename, 'r+b') as f_aux:
-                offset = 0
-                while True:
-                    data = f_aux.read(self.record_size)
-                    if not data: break
+        # 2. Si no se encontró en .dat, buscar en .aux
+        if not found_in_dat:
+            try:
+                with open(self.aux_filename, 'r+b') as f_aux:
+                    offset = 0
+                    while True:
+                        data = f_aux.read(self.record_size)
+                        if not data: break
+                            
+                        record = Record.unpack(self.table, data)
                         
-                    record = Record.unpack(self.table, data)
-                    
-                    if record.key == key:
-                        if record.next == 0:
-                            record.next = -1
-                            f_aux.seek(offset)
-                            f_aux.write(record.pack())
-                            return True
-                        else:
-                            return False # Ya estaba borrado
-                    
-                    offset += self.record_size
-        except FileNotFoundError:
-            return False
+                        if record.key == key:
+                            if record.next == 0:
+                                record.next = -1
+                                f_aux.seek(offset)
+                                f_aux.write(record.pack())
+                                found_in_dat = True
+                                break
+                            else:
+                                return False # Ya estaba borrado
+                        
+                        offset += self.record_size
+            except FileNotFoundError:
+                pass
+
+        # 3. Si se encontró y marcó como borrado, reconstruir inmediatamente
+        if found_in_dat:
+            print(f"Registro con clave {key} marcado como borrado. Reconstruyendo archivo...")
+            self._rebuild()
+            return True
 
         return False # No se encontró
 
