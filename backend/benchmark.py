@@ -48,7 +48,7 @@ class DatabaseBenchmark:
         """Crear tablas con diferentes índices"""
         print("📋 Creando tablas con diferentes índices...\n")
         
-        csv_path = r"C:\Users\Gianpier\Documents\PFINALBD2\BD2-Restructuracion\data\Restaurantes.csv"
+        csv_path = r"C:\Users\Sergio\BD2-Restructuracion\data\Restaurantes.csv"
         
         tables = [
             ("Restaurantes_ISAM", "ISAM"),
